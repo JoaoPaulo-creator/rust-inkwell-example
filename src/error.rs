@@ -1,3 +1,4 @@
+use inkwell::builder::BuilderError;
 use std::error::Error;
 use std::fmt;
 
@@ -8,6 +9,12 @@ pub enum CompileError {
     Lex(String),
     Parse(String),
     Codegen(String),
+}
+
+impl From<BuilderError> for CompileError {
+    fn from(e: BuilderError) -> Self {
+        CompileError::Codegen(format!("LLVM builder error: {:?}", e))
+    }
 }
 
 impl fmt::Display for CompileError {

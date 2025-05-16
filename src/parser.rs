@@ -1,8 +1,7 @@
-use crate::ast::{BinOp, Expr, Statement};
+use crate::ast::*;
 use crate::error::CompileError;
 use crate::lexer::Token;
 
-/// Recursive descent parser for the simple language.
 pub struct Parser {
     tokens: Vec<Token>,
     pos: usize,
@@ -13,192 +12,314 @@ impl Parser {
         Parser { tokens, pos: 0 }
     }
 
-    // Helper: get current token.
-    fn current_token(&self) -> &Token {
+    fn peek(&self) -> &Token {
         &self.tokens[self.pos]
     }
-
-    // Helper: advance to the next token.
-    fn advance(&mut self) {
+    fn eat(&mut self) {
         if self.pos < self.tokens.len() {
-            self.pos += 1;
+            self.pos += 1
         }
     }
-
-    // Helper: expect a specific token and consume it, or return a parse error.
     fn expect(&mut self, expected: Token) -> Result<(), CompileError> {
-        if *self.current_token() == expected {
-            self.advance();
+        if *self.peek() == expected {
+            self.eat();
             Ok(())
         } else {
             Err(CompileError::Parse(format!(
-                "Expected {}, found {}",
+                "Expected {:?}, found {:?}",
                 expected,
-                self.current_token()
+                self.peek()
             )))
         }
     }
 
-    /// Parse the entire program (sequence of statements).
-    pub fn parse(&mut self) -> Result<Vec<Statement>, CompileError> {
-        let mut statements = Vec::new();
-        while !matches!(self.current_token(), Token::EOF) {
-            // Skip empty lines (EOL tokens)
-            if matches!(self.current_token(), Token::EOL) {
-                self.advance();
-                continue;
-            }
-            // Parse one statement
-            let stmt = self.parse_statement()?;
-            statements.push(stmt);
-            // After a statement, expect end-of-line or EOF
-            if matches!(self.current_token(), Token::EOL) {
-                self.advance(); // consume the newline
-                continue;
-            } else if matches!(self.current_token(), Token::EOF) {
-                break;
+    /// Top‐level entry: parse a whole program.
+    pub fn parse_program(&mut self) -> Result<Program, CompileError> {
+        let mut funcs = Vec::new();
+        let mut stmts = Vec::new();
+
+        while *self.peek() != Token::EOF {
+            if *self.peek() == Token::Fn {
+                funcs.push(self.parse_function()?);
             } else {
-                return Err(CompileError::Parse(format!(
-                    "Expected end-of-line or EOF after statement, found {}",
-                    self.current_token()
-                )));
+                stmts.push(self.parse_statement()?);
+                self.expect(Token::Semicolon)?;
             }
         }
-        Ok(statements)
+
+        Ok(Program {
+            functions: funcs,
+            statements: stmts,
+        })
     }
 
-    // Parse a single assignment statement: <ident> '=' <expr>
-    fn parse_statement(&mut self) -> Result<Statement, CompileError> {
-        // let token = self.current_token().clone();
-        let name = if let Token::Ident(name) = self.current_token() {
-            name.clone()
-        } else {
-            return Err(CompileError::Parse(format!(
-                "Expected identifier at start of statement, found {}",
-                self.current_token()
-            )));
+    /// Parse `fn name(arg1, arg2, …) { … }`
+    fn parse_function(&mut self) -> Result<Function, CompileError> {
+        self.expect(Token::Fn)?;
+        let name = match self.peek() {
+            Token::Ident(n) => n.clone(),
+            _ => return Err(CompileError::Parse("Expected function name".into())),
         };
-        self.advance(); // consume the identifier
-        self.expect(Token::Eq)?; // expect '=' symbol
-        let expr = self.parse_expr()?;
-        Ok(Statement { name, value: expr })
-    }
-
-    // Parse an expression (handles + and -).
-    fn parse_expr(&mut self) -> Result<Expr, CompileError> {
-        // expr := term { ('+' | '-') term }
-        let mut node = self.parse_term()?;
-        loop {
-            match self.current_token() {
-                Token::Plus => {
-                    self.advance();
-                    let right = self.parse_term()?;
-                    node = Expr::Binary {
-                        op: BinOp::Add,
-                        left: Box::new(node),
-                        right: Box::new(right),
-                    };
+        self.eat();
+        self.expect(Token::LParen)?;
+        let mut params = Vec::new();
+        if *self.peek() != Token::RParen {
+            loop {
+                if let Token::Ident(n) = self.peek() {
+                    params.push(n.clone());
+                    self.eat();
+                } else {
+                    return Err(CompileError::Parse("Expected parameter name".into()));
                 }
-                Token::Minus => {
-                    self.advance();
-                    let right = self.parse_term()?;
-                    node = Expr::Binary {
-                        op: BinOp::Sub,
-                        left: Box::new(node),
-                        right: Box::new(right),
-                    };
+                if *self.peek() == Token::Comma {
+                    self.eat();
+                    continue;
                 }
-                _ => break, // no more + or - at this level
+                break;
             }
         }
-        Ok(node)
+        self.expect(Token::RParen)?;
+        let body = self.parse_block()?;
+        Ok(Function { name, params, body })
     }
 
-    // Parse a term (handles * and /).
-    fn parse_term(&mut self) -> Result<Expr, CompileError> {
-        // term := factor { ('*' | '/') factor }
-        let mut node = self.parse_factor()?;
-        loop {
-            match self.current_token() {
-                Token::Star => {
-                    self.advance();
-                    let right = self.parse_factor()?;
-                    node = Expr::Binary {
-                        op: BinOp::Mul,
-                        left: Box::new(node),
-                        right: Box::new(right),
-                    };
-                }
-                Token::Slash => {
-                    self.advance();
-                    let right = self.parse_factor()?;
-                    node = Expr::Binary {
-                        op: BinOp::Div,
-                        left: Box::new(node),
-                        right: Box::new(right),
-                    };
-                }
-                _ => break, // no more * or / at this level
-            }
+    /// Parse a `{ stmt; stmt; … }` block
+    fn parse_block(&mut self) -> Result<Vec<Statement>, CompileError> {
+        self.expect(Token::LBrace)?;
+        let mut v = Vec::new();
+        while *self.peek() != Token::RBrace {
+            let stmt = self.parse_statement()?;
+            self.expect(Token::Semicolon)?;
+            v.push(stmt);
         }
-        Ok(node)
+        self.expect(Token::RBrace)?;
+        Ok(v)
     }
 
-    // Parse a factor (number, variable, parenthesized expr, or unary +/-).
-    fn parse_factor(&mut self) -> Result<Expr, CompileError> {
-        // factor := Number | Ident | '(' expr ')' | '-' factor | '+' factor
-        let token = self.current_token();
-        match token {
-            Token::Number(n) => {
-                let val = *n;
-                self.advance();
-                Ok(Expr::Number(val))
-            }
-            Token::Ident(name) => {
-                let var_name = name.clone();
-                self.advance();
-                Ok(Expr::Variable(var_name))
-            }
-            Token::LParen => {
-                self.advance();
+    /// Parse any single statement (var, assign, if, while, return, print, expr‐stmt).
+    fn parse_statement(&mut self) -> Result<Statement, CompileError> {
+        match self.peek() {
+            Token::Var => {
+                self.eat();
+                let name = if let Token::Ident(n) = self.peek() {
+                    n.clone()
+                } else {
+                    return Err(CompileError::Parse("Expected var name".into()));
+                };
+                self.eat();
+                self.expect(Token::Eq)?;
                 let expr = self.parse_expr()?;
-                if !matches!(self.current_token(), Token::RParen) {
-                    return Err(CompileError::Parse(format!(
-                        "Expected ')', found {}",
-                        self.current_token()
-                    )));
-                }
-                self.advance(); // consume ')'
-                Ok(expr)
+                Ok(Statement::VarDecl { name, expr })
             }
-            Token::Minus => {
-                // Unary minus: -X => 0 - X
-                self.advance();
-                let sub_expr = self.parse_factor()?;
-                Ok(Expr::Binary {
-                    op: BinOp::Sub,
-                    left: Box::new(Expr::Number(0)),
-                    right: Box::new(sub_expr),
+            Token::If => {
+                self.eat();
+                self.expect(Token::LParen)?;
+                let cond = self.parse_expr()?;
+                self.expect(Token::RParen)?;
+                let then_branch = self.parse_block()?;
+                let else_branch = if *self.peek() == Token::Else {
+                    self.eat();
+                    Some(self.parse_block()?)
+                } else {
+                    None
+                };
+                Ok(Statement::If {
+                    cond,
+                    then_branch,
+                    else_branch,
                 })
             }
-            Token::Plus => {
-                // Unary plus: just skip it
-                self.advance();
-                self.parse_factor()
+            Token::While => {
+                self.eat();
+                self.expect(Token::LParen)?;
+                let cond = self.parse_expr()?;
+                self.expect(Token::RParen)?;
+                let body = self.parse_block()?;
+                Ok(Statement::While { cond, body })
             }
-            Token::EOF => Err(CompileError::Parse(
-                "Unexpected end-of-file in expression".to_string(),
-            )),
-            Token::EOL => Err(CompileError::Parse(
-                "Unexpected end-of-line in expression".to_string(),
-            )),
+            Token::Return => {
+                self.eat();
+                let expr = self.parse_expr()?;
+                Ok(Statement::Return { expr })
+            }
+            Token::Print => {
+                self.eat();
+                let expr = self.parse_expr()?;
+                Ok(Statement::Print { expr })
+            }
+            Token::Ident(name)
+                if {
+                    // could be assignment or function‐call expr
+                    let lookahead = &self.tokens.get(self.pos + 1).unwrap_or(&Token::EOF);
+                    matches!(lookahead, Token::Eq)
+                } =>
+            {
+                // assignment: ident = expr
+                let name = name.clone();
+                self.eat();
+                self.expect(Token::Eq)?;
+                let expr = self.parse_expr()?;
+                Ok(Statement::Assign { name, expr })
+            }
             _ => {
-                // Any other token here is invalid in an expression
-                Err(CompileError::Parse(format!(
-                    "Unexpected token {} in expression",
-                    token
-                )))
+                // fallback: bare expression statement
+                let expr = self.parse_expr()?;
+                Ok(Statement::ExprStmt(expr))
             }
+        }
+    }
+
+    /// Parse expressions with correct precedence:
+    /// equality -> comparison -> addition -> term -> factor -> primary
+    fn parse_expr(&mut self) -> Result<Expr, CompileError> {
+        self.parse_equality()
+    }
+
+    fn parse_equality(&mut self) -> Result<Expr, CompileError> {
+        let mut lhs = self.parse_comparison()?;
+        while matches!(self.peek(), Token::EqEq | Token::Ne) {
+            let op = match self.peek() {
+                Token::EqEq => BinOp::Eq,
+                Token::Ne => BinOp::Ne,
+                _ => unreachable!(),
+            };
+            self.eat();
+            let rhs = self.parse_comparison()?;
+            lhs = Expr::Binary {
+                op,
+                left: Box::new(lhs),
+                right: Box::new(rhs),
+            };
+        }
+        Ok(lhs)
+    }
+
+    fn parse_comparison(&mut self) -> Result<Expr, CompileError> {
+        let mut lhs = self.parse_addition()?;
+        while matches!(self.peek(), Token::Lt | Token::Le | Token::Gt | Token::Ge) {
+            let op = match self.peek() {
+                Token::Lt => BinOp::Lt,
+                Token::Le => BinOp::Le,
+                Token::Gt => BinOp::Gt,
+                Token::Ge => BinOp::Ge,
+                _ => unreachable!(),
+            };
+            self.eat();
+            let rhs = self.parse_addition()?;
+            lhs = Expr::Binary {
+                op,
+                left: Box::new(lhs),
+                right: Box::new(rhs),
+            };
+        }
+        Ok(lhs)
+    }
+
+    fn parse_addition(&mut self) -> Result<Expr, CompileError> {
+        let mut lhs = self.parse_term()?;
+        while matches!(self.peek(), Token::Plus | Token::Minus) {
+            let op = if *self.peek() == Token::Plus {
+                BinOp::Add
+            } else {
+                BinOp::Sub
+            };
+            self.eat();
+            let rhs = self.parse_term()?;
+            lhs = Expr::Binary {
+                op,
+                left: Box::new(lhs),
+                right: Box::new(rhs),
+            };
+        }
+        Ok(lhs)
+    }
+
+    fn parse_term(&mut self) -> Result<Expr, CompileError> {
+        let mut lhs = self.parse_factor()?;
+        while matches!(self.peek(), Token::Star | Token::Slash | Token::Percent) {
+            let op = match self.peek() {
+                Token::Star => BinOp::Mul,
+                Token::Slash => BinOp::Div,
+                Token::Percent => BinOp::Rem,
+                _ => unreachable!(),
+            };
+            self.eat();
+            let rhs = self.parse_factor()?;
+            lhs = Expr::Binary {
+                op,
+                left: Box::new(lhs),
+                right: Box::new(rhs),
+            };
+        }
+        Ok(lhs)
+    }
+
+    fn parse_factor(&mut self) -> Result<Expr, CompileError> {
+        match self.peek() {
+            Token::Plus => {
+                self.eat();
+                let e = self.parse_factor()?;
+                Ok(Expr::Unary {
+                    op: UnOp::Pos,
+                    expr: Box::new(e),
+                })
+            }
+            Token::Minus => {
+                self.eat();
+                let e = self.parse_factor()?;
+                Ok(Expr::Unary {
+                    op: UnOp::Neg,
+                    expr: Box::new(e),
+                })
+            }
+            Token::Number(n) => {
+                let v = *n;
+                self.eat();
+                Ok(Expr::Number(v))
+            }
+            Token::BoolLiteral(b) => {
+                let v = *b;
+                self.eat();
+                Ok(Expr::Bool(v))
+            }
+            Token::StrLiteral(s) => {
+                let v = s.clone();
+                self.eat();
+                Ok(Expr::StrLiteral(v))
+            }
+            Token::Ident(name) => {
+                let name = name.clone();
+                self.eat();
+                // function call?
+                if *self.peek() == Token::LParen {
+                    self.eat();
+                    let mut args = Vec::new();
+                    if *self.peek() != Token::RParen {
+                        loop {
+                            args.push(self.parse_expr()?);
+                            if *self.peek() == Token::Comma {
+                                self.eat();
+                                continue;
+                            }
+                            break;
+                        }
+                    }
+                    self.expect(Token::RParen)?;
+                    Ok(Expr::Call { name, args })
+                } else {
+                    Ok(Expr::Variable(name))
+                }
+            }
+            Token::LParen => {
+                self.eat();
+                let e = self.parse_expr()?;
+                self.expect(Token::RParen)?;
+                Ok(e)
+            }
+            other => Err(CompileError::Parse(format!(
+                "Unexpected token in factor: {:?}",
+                other
+            ))),
         }
     }
 }

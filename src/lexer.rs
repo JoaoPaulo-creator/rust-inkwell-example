@@ -1,108 +1,208 @@
+// src/lexer.rs
+
 use crate::error::CompileError;
 
-/// Tokens recognized by the lexer.
 #[derive(Debug, PartialEq)]
 pub enum Token {
-    Ident(String), // identifier (variable name)
-    Number(i64),   // numeric literal
-    Plus,          // '+'
-    Minus,         // '-'
-    Star,          // '*'
-    Slash,         // '/'
-    Eq,            // '='
-    LParen,        // '('
-    RParen,        // ')'
-    EOL,           // end-of-line (newline)
-    EOF,           // end-of-file
+    // Keywords
+    Fn,
+    Var,
+    If,
+    Else,
+    While,
+    Return,
+    Print,
+    // Identifiers and literals
+    Ident(String),
+    Number(i64),
+    StrLiteral(String),
+    BoolLiteral(bool),
+    // Operators
+    Plus,
+    Minus,
+    Star,
+    Slash,
+    Percent,
+    Lt,
+    Le,
+    Gt,
+    Ge,
+    EqEq,
+    Ne,
+    Eq, // =
+    // Delimiters
+    LParen,
+    RParen,
+    LBrace,
+    RBrace,
+    Comma,
+    Semicolon,
+    // Special
+    EOF,
 }
 
-impl std::fmt::Display for Token {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        use Token::*;
-        match self {
-            Ident(name) => write!(f, "identifier {}", name),
-            Number(n) => write!(f, "number {}", n),
-            Plus => write!(f, "'+'"),
-            Minus => write!(f, "'-'"),
-            Star => write!(f, "'*'"),
-            Slash => write!(f, "'/'"),
-            Eq => write!(f, "'='"),
-            LParen => write!(f, "'('"),
-            RParen => write!(f, "')'"),
-            EOL => write!(f, "end-of-line"),
-            EOF => write!(f, "end-of-file"),
-        }
-    }
+fn is_ident_start(c: char) -> bool {
+    c.is_ascii_alphabetic() || c == '_'
+}
+fn is_ident_continue(c: char) -> bool {
+    c.is_ascii_alphanumeric() || c == '_'
 }
 
-/// Lexical analyzer: converts input text into a sequence of tokens.
 pub fn lex(input: &str) -> Result<Vec<Token>, CompileError> {
     let mut tokens = Vec::new();
     let mut chars = input.chars().peekable();
-    let mut line_number = 1;
-    while let Some(ch) = chars.next() {
+
+    while let Some(&ch) = chars.peek() {
         match ch {
             // Skip whitespace
-            ' ' | '\t' | '\r' => continue,
-            '\n' => {
-                tokens.push(Token::EOL);
-                line_number += 1;
+            c if c.is_whitespace() => {
+                chars.next();
             }
-            // Numeric literal
-            '0'..='9' => {
-                let mut value: i64 = (ch as u8 - b'0') as i64;
-                // accumulate subsequent digit characters
-                while let Some(next_ch) = chars.peek() {
-                    if next_ch.is_ascii_digit() {
-                        let digit = (*next_ch as u8 - b'0') as i64;
-                        value = value
-                            .checked_mul(10)
-                            .and_then(|v| v.checked_add(digit))
-                            .ok_or_else(|| {
-                                CompileError::Lex(format!(
-                                    "Number literal too large at line {}",
-                                    line_number
-                                ))
-                            })?;
-                        chars.next(); // consume the digit
-                    } else {
+            // Two‐char operators
+            '<' => {
+                chars.next();
+                if chars.peek() == Some(&'=') {
+                    chars.next();
+                    tokens.push(Token::Le);
+                } else {
+                    tokens.push(Token::Lt);
+                }
+            }
+            '>' => {
+                chars.next();
+                if chars.peek() == Some(&'=') {
+                    chars.next();
+                    tokens.push(Token::Ge);
+                } else {
+                    tokens.push(Token::Gt);
+                }
+            }
+            '=' => {
+                chars.next();
+                if chars.peek() == Some(&'=') {
+                    chars.next();
+                    tokens.push(Token::EqEq);
+                } else {
+                    tokens.push(Token::Eq);
+                }
+            }
+            '!' => {
+                chars.next();
+                if chars.peek() == Some(&'=') {
+                    chars.next();
+                    tokens.push(Token::Ne);
+                } else {
+                    return Err(CompileError::Lex("Unexpected '!'".into()));
+                }
+            }
+            // Single‐char operators/delimiters
+            '+' => {
+                chars.next();
+                tokens.push(Token::Plus);
+            }
+            '-' => {
+                chars.next();
+                tokens.push(Token::Minus);
+            }
+            '*' => {
+                chars.next();
+                tokens.push(Token::Star);
+            }
+            '/' => {
+                chars.next();
+                tokens.push(Token::Slash);
+            }
+            '%' => {
+                chars.next();
+                tokens.push(Token::Percent);
+            }
+            '(' => {
+                chars.next();
+                tokens.push(Token::LParen);
+            }
+            ')' => {
+                chars.next();
+                tokens.push(Token::RParen);
+            }
+            '{' => {
+                chars.next();
+                tokens.push(Token::LBrace);
+            }
+            '}' => {
+                chars.next();
+                tokens.push(Token::RBrace);
+            }
+            ',' => {
+                chars.next();
+                tokens.push(Token::Comma);
+            }
+            ';' => {
+                chars.next();
+                tokens.push(Token::Semicolon);
+            }
+            // String literal
+            '"' => {
+                chars.next(); // skip opening "
+                let mut s = String::new();
+                while let Some(&c2) = chars.peek() {
+                    if c2 == '"' {
+                        chars.next();
                         break;
                     }
+                    s.push(c2);
+                    chars.next();
                 }
-                tokens.push(Token::Number(value));
+                tokens.push(Token::StrLiteral(s));
             }
-            // Identifier (variable name)
-            'a'..='z' | 'A'..='Z' | '_' => {
-                let mut name = String::new();
-                name.push(ch);
-                while let Some(next_ch) = chars.peek() {
-                    if next_ch.is_alphanumeric() || *next_ch == '_' {
-                        name.push(*next_ch);
+            // Number literal
+            c if c.is_ascii_digit() => {
+                let mut val = 0i64;
+                while let Some(&d) = chars.peek() {
+                    if d.is_ascii_digit() {
+                        val = val * 10 + (d as u8 - b'0') as i64;
                         chars.next();
                     } else {
                         break;
                     }
                 }
-                tokens.push(Token::Ident(name));
+                tokens.push(Token::Number(val));
             }
-            // Operators and symbols
-            '+' => tokens.push(Token::Plus),
-            '-' => tokens.push(Token::Minus),
-            '*' => tokens.push(Token::Star),
-            '/' => tokens.push(Token::Slash),
-            '=' => tokens.push(Token::Eq),
-            '(' => tokens.push(Token::LParen),
-            ')' => tokens.push(Token::RParen),
-            // Any other character is unexpected
-            _ => {
+            // Identifier or keyword or boolean
+            c if is_ident_start(c) => {
+                let mut ident = String::new();
+                ident.push(c);
+                chars.next();
+                while let Some(&c2) = chars.peek() {
+                    if is_ident_continue(c2) {
+                        ident.push(c2);
+                        chars.next();
+                    } else {
+                        break;
+                    }
+                }
+                let tok = match ident.as_str() {
+                    "fn" => Token::Fn,
+                    "var" => Token::Var,
+                    "if" => Token::If,
+                    "else" => Token::Else,
+                    "while" => Token::While,
+                    "return" => Token::Return,
+                    "print" => Token::Print,
+                    "true" => Token::BoolLiteral(true),
+                    "false" => Token::BoolLiteral(false),
+                    _ => Token::Ident(ident),
+                };
+                tokens.push(tok);
+            }
+            other => {
                 return Err(CompileError::Lex(format!(
-                    "Unexpected character '{}' at line {}",
-                    ch, line_number
+                    "Unexpected character '{}'",
+                    other
                 )));
             }
         }
     }
-    // End-of-file marker
+
     tokens.push(Token::EOF);
     Ok(tokens)
 }
