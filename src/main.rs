@@ -35,8 +35,9 @@ fn run() -> Result<(), CompileError> {
     let mut cg = CodeGen::new(&ctx, module);
     cg.compile_program(&prog)?;
 
-    // print the IR
-    println!("===== LLVM IR =====\n{}", cg.module.print_to_string());
+    let ir = cg.module.print_to_string().to_string();
+    std::fs::write("program.ll", ir)
+        .map_err(|e| CompileError::Io(format!("Failed to write IR file: {}", e)))?;
 
     // JIT & run
     let ee = cg

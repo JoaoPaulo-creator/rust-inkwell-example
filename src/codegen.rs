@@ -108,11 +108,19 @@ impl<'ctx> CodeGen<'ctx> {
             }
             Statement::Assign { name, expr } => {
                 let val = self.compile_expr(expr)?;
-                let ptr = self
-                    .variables
-                    .get(name)
-                    .ok_or_else(|| CompileError::Codegen(format!("undefined var {}", name)))?;
-                self.builder.build_store(*ptr, val)?;
+                let ptr = if let Some(existing) = self.variables.get(name) {
+                    *existing
+                } else {
+                    let new_ptr = self.builder.build_alloca(self.i32_type, name)?;
+                    self.variables.insert(name.clone(), new_ptr);
+                    new_ptr
+                };
+
+                // let ptr = self
+                //     .variables
+                //     .get(name)
+                //     .ok_or_else(|| CompileError::Codegen(format!("undefined var {}", name)))?;
+                self.builder.build_store(ptr, val)?;
             }
             Statement::Print { expr } => {
                 let val = self.compile_expr(expr)?;

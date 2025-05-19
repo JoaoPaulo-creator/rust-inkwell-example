@@ -42,8 +42,11 @@ impl Parser {
             if *self.peek() == Token::Fn {
                 funcs.push(self.parse_function()?);
             } else {
-                stmts.push(self.parse_statement()?);
-                self.expect(Token::Semicolon)?;
+                let stmt = self.parse_statement()?;
+                stmts.push(stmt);
+                if *self.peek() == Token::Semicolon {
+                    self.eat();
+                }
             }
         }
 
