@@ -64,15 +64,18 @@ impl<'ctx> CodeGen<'ctx> {
     }
 
     /// Declare & define one user function.
+    // codegen.rs
     fn compile_function_decl(&mut self, f: &Function) -> Result<(), CompileError> {
-        // all parameters are i32, return i32
+        // signature: i32 fn(i32, i32, …)
         let param_types = vec![self.i32_type.into(); f.params.len()];
         let fn_type = self.i32_type.fn_type(&param_types, false);
         let function = self.module.add_function(&f.name, fn_type, None);
+
+        // entry block
         let entry = self.context.append_basic_block(function, "entry");
         self.builder.position_at_end(entry);
 
-        // allocate space for each parameter
+        // allocate & store each parameter
         self.variables.clear();
         for (i, pname) in f.params.iter().enumerate() {
             let ptr = self.builder.build_alloca(self.i32_type, pname)?;
@@ -81,15 +84,14 @@ impl<'ctx> CodeGen<'ctx> {
             self.variables.insert(pname.clone(), ptr);
         }
 
-        // compile body
+        // compile the body
         for stmt in &f.body {
             self.compile_statement(stmt, Some(function))?;
         }
 
-        // if no `return` seen, default to 0
-        let _ = self
-            .builder
-            .build_return(Some(&self.i32_type.const_int(0, false)));
+        // if user forgot `return`, default to 0
+        self.builder
+            .build_return(Some(&self.i32_type.const_int(0, false)))?;
         Ok(())
     }
 

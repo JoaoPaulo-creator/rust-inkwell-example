@@ -5,6 +5,16 @@ all:
 	clang program.o -o toy_exec
 	./toy_exec
 
+
+fct:
+	cargo build -j 12
+	./target/debug/toy_compiler functions.toy
+	llc -filetype=obj -relocation-model=pic program.ll -o program.o
+	clang program.o -o toy_exec
+	./toy_exec
+
+
+
 build:
 	cargo build -j 12
 	./target/debug/toy_compiler input.toy
