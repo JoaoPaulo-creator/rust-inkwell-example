@@ -124,7 +124,7 @@ impl Parser {
                 self.eat();
                 self.expect(Token::Eq)?;
                 let expr = self.parse_expr()?;
-                Ok(Statement::VarDecl { name, expr })
+                Ok(Statement::LetDecl { name, expr })
             }
             Token::If => {
                 self.eat();
