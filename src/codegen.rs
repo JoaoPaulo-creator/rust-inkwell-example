@@ -266,7 +266,6 @@ impl<'ctx> CodeGen<'ctx> {
                     .builder
                     .build_global_string_ptr(&format!("{}\0", s), "strlit")?;
                 let ptr_val = gs.as_pointer_value();
-                // In the Expr::StrLiteral match arm:
                 let cast = self.builder.build_bit_cast(
                     ptr_val,
                     self.context

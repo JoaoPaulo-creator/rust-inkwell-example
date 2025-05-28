@@ -1,15 +1,11 @@
-a = 
-3
-b = 
-9
-toy'
+; ModuleID = 'toy'
 source_filename = "toy"
 
 @fmt = private unnamed_addr constant [4 x i8] c"%s\0A\00", align 1
-@str = private unnamed_addr constant [5 x i8] c"a = \00", align 1
+@str = private unnamed_addr constant [12 x i8] c"result of a\00", align 1
 @fmt.1 = private unnamed_addr constant [4 x i8] c"%d\0A\00", align 1
 @fmt.2 = private unnamed_addr constant [4 x i8] c"%s\0A\00", align 1
-@str.3 = private unnamed_addr constant [5 x i8] c"b = \00", align 1
+@str.3 = private unnamed_addr constant [12 x i8] c"result of b\00", align 1
 @fmt.4 = private unnamed_addr constant [4 x i8] c"%d\0A\00", align 1
 
 declare i32 @printf(ptr, ...)
