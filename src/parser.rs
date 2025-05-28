@@ -114,6 +114,18 @@ impl Parser {
                 let expr = self.parse_expr()?;
                 Ok(Statement::VarDecl { name, expr })
             }
+            Token::Let => {
+                self.eat();
+                let name = if let Token::Ident(n) = self.peek() {
+                    n.clone()
+                } else {
+                    return Err(CompileError::Parse("Expected let name".into()));
+                };
+                self.eat();
+                self.expect(Token::Eq)?;
+                let expr = self.parse_expr()?;
+                Ok(Statement::VarDecl { name, expr })
+            }
             Token::If => {
                 self.eat();
                 self.expect(Token::LParen)?;

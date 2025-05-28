@@ -6,6 +6,7 @@ use crate::error::CompileError;
 pub enum Token {
     // Keywords
     Fn,
+    Let,
     Var,
     If,
     Else,
@@ -183,6 +184,7 @@ pub fn lex(input: &str) -> Result<Vec<Token>, CompileError> {
                 let tok = match ident.as_str() {
                     "fn" => Token::Fn,
                     "var" => Token::Var,
+                    "let" => Token::Let,
                     "if" => Token::If,
                     "else" => Token::Else,
                     "while" => Token::While,

@@ -108,6 +108,12 @@ impl<'ctx> CodeGen<'ctx> {
                 self.builder.build_store(ptr, val)?;
                 self.variables.insert(name.clone(), ptr);
             }
+            Statement::LetDecl { name, expr } => {
+                let val = self.compile_expr(expr)?;
+                let ptr = self.builder.build_alloca(self.i32_type, name)?;
+                self.builder.build_store(ptr, val)?;
+                self.variables.insert(name.clone(), ptr);
+            }
             Statement::Assign { name, expr } => {
                 let val = self.compile_expr(expr)?;
                 let ptr = if let Some(existing) = self.variables.get(name) {

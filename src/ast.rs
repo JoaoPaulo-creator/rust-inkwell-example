@@ -20,6 +20,10 @@ pub enum Statement {
         name: String,
         expr: Expr,
     },
+    LetDecl {
+        name: String,
+        expr: Expr,
+    },
     Assign {
         name: String,
         expr: Expr,
