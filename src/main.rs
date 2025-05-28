@@ -35,8 +35,8 @@ fn run() -> Result<(), CompileError> {
     let mut cg = CodeGen::new(&ctx, module);
     cg.compile_program(&prog)?;
 
-    let ir = cg.module.print_to_string().to_string();
-    std::fs::write("program.ll", ir)
+    // let ir = cg.module.print_to_string().to_string();
+    std::fs::write("program.ll", cg.module.print_to_string().to_string())
         .map_err(|e| CompileError::Io(format!("Failed to write IR file: {}", e)))?;
 
     // JIT & run
@@ -48,7 +48,7 @@ fn run() -> Result<(), CompileError> {
         let main_fn = ee
             .get_function::<unsafe extern "C" fn() -> i32>("main")
             .map_err(|_| CompileError::Codegen("No main()".into()))?;
-        println!(">>> Program returned: {}", main_fn.call());
+        eprintln!(">>> Program returned: {}", main_fn.call());
     }
     Ok(())
 }

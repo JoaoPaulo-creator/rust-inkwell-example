@@ -25,7 +25,7 @@ impl<'ctx> CodeGen<'ctx> {
         let i32_type = ctx.i32_type();
 
         // declare: i32 @printf(i8*, ...) external
-        let i8_ptr = ctx.i8_type().ptr_type(AddressSpace::default());
+        let i8_ptr = ctx.ptr_type(AddressSpace::default());
         let printf_type = i32_type.fn_type(&[i8_ptr.into()], true);
         let printf_fn = module.add_function("printf", printf_type, None);
 
@@ -116,35 +116,34 @@ impl<'ctx> CodeGen<'ctx> {
                     new_ptr
                 };
 
-                // let ptr = self
-                //     .variables
-                //     .get(name)
-                //     .ok_or_else(|| CompileError::Codegen(format!("undefined var {}", name)))?;
-                self.builder.build_store(ptr, val)?;
+                let _ = self.builder.build_store(ptr, val)?;
             }
-            Statement::Print { expr } => {
-                let val = self.compile_expr(expr)?;
-                // decide format and args
-                if let Expr::StrLiteral(_) = expr {
-                    // string literal: print as "%s\n"
-                    let gs = self.builder.build_global_string_ptr("%s\n\0", "fmt")?;
-                    let fmt_ptr = gs.as_pointer_value();
+            Statement::Print { expr } => match expr {
+                Expr::StrLiteral(s) => {
+                    let fmt = self.builder.build_global_string_ptr("%s\n\0", "fmt")?;
+                    let fmt_ptr = fmt.as_pointer_value();
+                    let str_gv = self
+                        .builder
+                        .build_global_string_ptr(&format!("{}\0", s), "str");
+                    let str_ptr = str_gv?.as_pointer_value();
                     let _ = self.builder.build_call(
                         self.printf_fn,
-                        &[fmt_ptr.into(), val.into()],
+                        &[fmt_ptr.into(), str_ptr.into()],
                         "printstr",
                     );
-                } else {
-                    // integer/boolean: use "%d\n"
-                    let gs = self.builder.build_global_string_ptr("%d\n\0", "fmt")?;
-                    let fmt_ptr = gs.as_pointer_value();
+                }
+
+                _ => {
+                    let val = self.compile_expr(expr)?;
+                    let fmt = self.builder.build_global_string_ptr("%d\n\0", "fmt")?;
+                    let fmt_ptr = fmt.as_pointer_value();
                     let _ = self.builder.build_call(
                         self.printf_fn,
                         &[fmt_ptr.into(), val.into()],
                         "printi",
                     );
                 }
-            }
+            },
             Statement::Return { expr } => {
                 let val = self.compile_expr(expr)?;
                 let _ = self.builder.build_return(Some(&val));
@@ -267,9 +266,10 @@ impl<'ctx> CodeGen<'ctx> {
                     .builder
                     .build_global_string_ptr(&format!("{}\0", s), "strlit")?;
                 let ptr_val = gs.as_pointer_value();
+                // In the Expr::StrLiteral match arm:
                 let cast = self.builder.build_bit_cast(
                     ptr_val,
-                    self.i32_type
+                    self.context
                         .ptr_type(AddressSpace::default())
                         .as_basic_type_enum(),
                     "strtoint",
