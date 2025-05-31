@@ -24,6 +24,19 @@ entry:
   %z = alloca i32, align 4
   store i32 %calltmp, ptr %z, align 4
   %z1 = load i32, ptr %z, align 4
-  %printi = call i32 (ptr, ...) @printf(ptr @fmt, i32 %z1)
+  %eqtmp = icmp eq i32 %z1, 7
+  %bool2int = zext i1 %eqtmp to i32
+  %ifcond = icmp ne i32 %bool2int, 0
+  br i1 %ifcond, label %then, label %else
+
+then:                                             ; preds = %entry
+  %z2 = load i32, ptr %z, align 4
+  %printi = call i32 (ptr, ...) @printf(ptr @fmt, i32 %z2)
+  br label %ifcont
+
+else:                                             ; preds = %entry
+  br label %ifcont
+
+ifcont:                                           ; preds = %else, %then
   ret i32 0
 }
