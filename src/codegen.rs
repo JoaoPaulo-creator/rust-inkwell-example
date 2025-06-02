@@ -17,6 +17,7 @@ pub struct CodeGen<'ctx> {
     i32_type: IntType<'ctx>,
     printf_fn: FunctionValue<'ctx>,
     variables: HashMap<String, PointerValue<'ctx>>,
+    array_sizes: HashMap<String, usize>,
 }
 
 impl<'ctx> CodeGen<'ctx> {
@@ -35,6 +36,7 @@ impl<'ctx> CodeGen<'ctx> {
             i32_type,
             printf_fn,
             variables: HashMap::new(),
+            array_sizes: HashMap::new(),
         }
     }
 
@@ -66,6 +68,7 @@ impl<'ctx> CodeGen<'ctx> {
         self.builder.position_at_end(entry);
 
         self.variables.clear();
+        self.array_sizes.clear();
         for (i, pname) in f.params.iter().enumerate() {
             let ptr = self.builder.build_alloca(self.i32_type, "")?;
             self.builder
@@ -298,6 +301,7 @@ impl<'ctx> CodeGen<'ctx> {
             };
             self.builder.build_store(ptr, val)?;
         }
+        self.array_sizes.insert(name.to_string(), elems.len());
         Ok(alloca)
     }
 
@@ -402,6 +406,19 @@ impl<'ctx> CodeGen<'ctx> {
                     })?
                     .clone();
                 let idx = self.compile_expr(index)?;
+                // Bounds checking
+                let size = self.array_sizes.get(array_name).ok_or_else(|| {
+                    CompileError::Codegen(format!("undefined array {}", array_name))
+                })?;
+                let idx_val = idx.get_sign_extended_constant().ok_or_else(|| {
+                    CompileError::Codegen("Index must be a constant or resolvable integer".into())
+                })?;
+                if idx_val < 0 || idx_val as usize >= *size {
+                    return Err(CompileError::Codegen(format!(
+                        "Index {} out of bounds for array {} of size {}",
+                        idx_val, array_name, size
+                    )));
+                }
                 let array_type = self.i32_type.array_type(0);
                 let ptr = unsafe {
                     self.builder.build_in_bounds_gep(
@@ -415,18 +432,18 @@ impl<'ctx> CodeGen<'ctx> {
                 Ok(loaded.into_int_value())
             }
             Expr::Length { array } => {
-                match &**array {
-                    Expr::Variable(_) => {}
+                let array_name = match &**array {
+                    Expr::Variable(name) => name,
                     _ => {
                         return Err(CompileError::Codegen(
                             "Length must be called on a variable".into(),
                         ));
                     }
                 };
-                let size = self
-                    .i32_type
-                    .const_int(array.array_len().unwrap_or(0) as u64, false);
-                Ok(size)
+                let size = self.array_sizes.get(array_name).ok_or_else(|| {
+                    CompileError::Codegen(format!("undefined array {}", array_name))
+                })?;
+                Ok(self.i32_type.const_int(*size as u64, false))
             }
         }
     }
