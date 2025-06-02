@@ -28,9 +28,9 @@ pub enum Token {
     Le,
     Gt,
     Ge,
-    EqEq,
-    Ne,
-    Eq, // =
+    EqEq, // ==
+    Ne,   // !=
+    Eq,   // =
     // Delimiters
     LParen,
     RParen,

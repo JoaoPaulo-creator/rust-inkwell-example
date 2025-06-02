@@ -2,41 +2,33 @@
 source_filename = "toy"
 
 @fmt = private unnamed_addr constant [4 x i8] c"%d\0A\00", align 1
+@fmt.1 = private unnamed_addr constant [4 x i8] c"%s\0A\00", align 1
+@str = private unnamed_addr constant [5 x i8] c"done\00", align 1
 
 declare i32 @printf(ptr, ...)
 
-define i32 @add(i32 %0, i32 %1) {
-entry:
-  %x = alloca i32, align 4
-  store i32 %0, ptr %x, align 4
-  %y = alloca i32, align 4
-  store i32 %1, ptr %y, align 4
-  %x1 = load i32, ptr %x, align 4
-  %y2 = load i32, ptr %y, align 4
-  %addtmp = add i32 %x1, %y2
-  ret i32 %addtmp
-  ret i32 0
-}
-
 define i32 @main() {
 entry:
-  %calltmp = call i32 @add(i32 3, i32 4)
-  %z = alloca i32, align 4
-  store i32 %calltmp, ptr %z, align 4
-  %z1 = load i32, ptr %z, align 4
-  %eqtmp = icmp eq i32 %z1, 7
-  %bool2int = zext i1 %eqtmp to i32
-  %ifcond = icmp ne i32 %bool2int, 0
-  br i1 %ifcond, label %then, label %else
+  %i = alloca i32, align 4
+  store i32 3, ptr %i, align 4
+  br label %loop
 
-then:                                             ; preds = %entry
-  %z2 = load i32, ptr %z, align 4
-  %printi = call i32 (ptr, ...) @printf(ptr @fmt, i32 %z2)
-  br label %ifcont
+loop:                                             ; preds = %body, %entry
+  %i1 = load i32, ptr %i, align 4
+  %lttmp = icmp slt i32 %i1, 10
+  %bool2int = zext i1 %lttmp to i32
+  %whilecond = icmp ne i32 %bool2int, 0
+  br i1 %whilecond, label %body, label %after
 
-else:                                             ; preds = %entry
-  br label %ifcont
-
-ifcont:                                           ; preds = %else, %then
+after:                                            ; preds = %loop
+  %printstr = call i32 (ptr, ...) @printf(ptr @fmt.1, ptr @str)
   ret i32 0
+
+body:                                             ; preds = %loop
+  %i2 = load i32, ptr %i, align 4
+  %printi = call i32 (ptr, ...) @printf(ptr @fmt, i32 %i2)
+  %i3 = load i32, ptr %i, align 4
+  %addtmp = add i32 %i3, 1
+  store i32 %addtmp, ptr %i, align 4
+  br label %loop
 }

@@ -1,3 +1,7 @@
+build:
+	cargo build -j 12
+	./target/debug/toy_compiler
+
 all:
 	cargo build -j 12
 	./target/debug/toy_compiler input.toy
@@ -12,12 +16,6 @@ fct:
 	llc -filetype=obj -relocation-model=pic program.ll -o program.o
 	clang program.o -o toy_exec
 	./toy_exec
-
-
-
-build:
-	cargo build -j 12
-	./target/debug/toy_compiler input.toy
 
 llvm:
 	llc -filetype=obj -relocation=no-pie program.ll -o program.o
