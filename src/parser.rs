@@ -92,14 +92,16 @@ impl Parser {
         let mut v = Vec::new();
         while *self.peek() != Token::RBrace {
             let stmt = self.parse_statement()?;
-            self.expect(Token::Semicolon)?;
             v.push(stmt);
+            if *self.peek() == Token::Semicolon {
+                self.eat();
+            }
         }
         self.expect(Token::RBrace)?;
         Ok(v)
     }
 
-    /// Parse any single statement (var, assign, if, while, return, print, expr‐stmt).
+    /// Parse any single statement (var, assign, indexed assign, if, while, return, print, expr‐stmt).
     fn parse_statement(&mut self) -> Result<Statement, CompileError> {
         match self.peek() {
             Token::Var => {
@@ -162,22 +164,28 @@ impl Parser {
                 let expr = self.parse_expr()?;
                 Ok(Statement::Print { expr })
             }
-            Token::Ident(name)
-                if {
-                    // could be assignment or function‐call expr
-                    let lookahead = &self.tokens.get(self.pos + 1).unwrap_or(&Token::EOF);
-                    matches!(lookahead, Token::Eq)
-                } =>
-            {
-                // assignment: ident = expr
-                let name = name.clone();
-                self.eat();
-                self.expect(Token::Eq)?;
+            Token::Ident(_) => {
+                // Could be an assignment, indexed assignment, or expression statement
                 let expr = self.parse_expr()?;
-                Ok(Statement::Assign { name, expr })
+                if *self.peek() == Token::Eq {
+                    self.eat();
+                    let value = self.parse_expr()?;
+                    match expr {
+                        Expr::Variable(name) => Ok(Statement::Assign { name, expr: value }),
+                        Expr::Index { array, index } => Ok(Statement::IndexedAssign {
+                            array,
+                            index,
+                            expr: Box::new(value),
+                        }),
+                        _ => Err(CompileError::Parse(
+                            "Left-hand side of assignment must be a variable or array index".into(),
+                        )),
+                    }
+                } else {
+                    Ok(Statement::ExprStmt(expr))
+                }
             }
             _ => {
-                // fallback: bare expression statement
                 let expr = self.parse_expr()?;
                 Ok(Statement::ExprStmt(expr))
             }
@@ -270,7 +278,6 @@ impl Parser {
     }
 
     fn parse_factor(&mut self) -> Result<Expr, CompileError> {
-        // 1) Parse “primary”:
         let mut node = match self.peek() {
             Token::LBracket => {
                 self.eat(); // consume '['
@@ -341,7 +348,6 @@ impl Parser {
             }
         };
 
-        // 2) Postfix “index” or “.length()” chaining:
         loop {
             match self.peek() {
                 Token::LBracket => {

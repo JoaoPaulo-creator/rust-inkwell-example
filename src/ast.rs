@@ -28,6 +28,11 @@ pub enum Statement {
         name: String,
         expr: Expr,
     },
+    IndexedAssign {
+        array: Box<Expr>,
+        index: Box<Expr>,
+        expr: Box<Expr>,
+    },
     Return {
         expr: Expr,
     },

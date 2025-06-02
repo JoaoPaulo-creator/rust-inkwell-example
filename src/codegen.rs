@@ -24,7 +24,6 @@ impl<'ctx> CodeGen<'ctx> {
         let builder = ctx.create_builder();
         let i32_type = ctx.i32_type();
 
-        // declare: i32 @printf(i8*, ...) external
         let i8_ptr = ctx.ptr_type(AddressSpace::default());
         let printf_type = i32_type.fn_type(&[i8_ptr.into()], true);
         let printf_fn = module.add_function("printf", printf_type, None);
@@ -68,7 +67,7 @@ impl<'ctx> CodeGen<'ctx> {
 
         self.variables.clear();
         for (i, pname) in f.params.iter().enumerate() {
-            let ptr = self.builder.build_alloca(self.i32_type, pname)?;
+            let ptr = self.builder.build_alloca(self.i32_type, "")?;
             self.builder
                 .build_store(ptr, function.get_nth_param(i as u32).unwrap())?;
             self.variables.insert(pname.clone(), ptr);
@@ -90,46 +89,70 @@ impl<'ctx> CodeGen<'ctx> {
     ) -> Result<(), CompileError> {
         match stmt {
             Statement::VarDecl { name, expr } => {
-                let val = self.compile_expr(expr)?;
-                let ptr = if let Expr::ArrayLiteral(_) = expr {
-                    let array_type = self
-                        .i32_type
-                        .array_type(expr.array_len().unwrap_or(0) as u32);
-                    self.builder.build_alloca(array_type, name)?
+                let ptr = if let Expr::ArrayLiteral(elems) = expr {
+                    self.compile_array_literal(elems, name)?
                 } else {
-                    self.builder.build_alloca(self.i32_type, name)?
+                    let val = self.compile_expr(expr)?;
+                    let ptr = self.builder.build_alloca(self.i32_type, name)?;
+                    self.builder.build_store(ptr, val)?;
+                    ptr
                 };
-                self.builder.build_store(ptr, val)?;
                 self.variables.insert(name.clone(), ptr);
             }
             Statement::LetDecl { name, expr } => {
-                let val = self.compile_expr(expr)?;
-                let ptr = if let Expr::ArrayLiteral(_) = expr {
-                    let array_type = self
-                        .i32_type
-                        .array_type(expr.array_len().unwrap_or(0) as u32);
-                    self.builder.build_alloca(array_type, name)?
+                let ptr = if let Expr::ArrayLiteral(elems) = expr {
+                    self.compile_array_literal(elems, name)?
                 } else {
-                    self.builder.build_alloca(self.i32_type, name)?
+                    let val = self.compile_expr(expr)?;
+                    let ptr = self.builder.build_alloca(self.i32_type, name)?;
+                    self.builder.build_store(ptr, val)?;
+                    ptr
                 };
-                self.builder.build_store(ptr, val)?;
                 self.variables.insert(name.clone(), ptr);
             }
             Statement::Assign { name, expr } => {
-                let val = self.compile_expr(expr)?;
                 let ptr = if let Some(existing) = self.variables.get(name) {
                     *existing
                 } else {
-                    let ptr = if let Expr::ArrayLiteral(_) = expr {
-                        let array_type = self
-                            .i32_type
-                            .array_type(expr.array_len().unwrap_or(0) as u32);
-                        self.builder.build_alloca(array_type, name)?
-                    } else {
-                        self.builder.build_alloca(self.i32_type, name)?
-                    };
-                    self.variables.insert(name.clone(), ptr);
-                    ptr
+                    return Err(CompileError::Codegen(format!(
+                        "undefined variable {}",
+                        name
+                    )));
+                };
+                if let Expr::ArrayLiteral(elems) = expr {
+                    let new_ptr = self.compile_array_literal(elems, name)?;
+                    self.variables.insert(name.clone(), new_ptr);
+                } else {
+                    let val = self.compile_expr(expr)?;
+                    self.builder.build_store(ptr, val)?;
+                }
+            }
+            Statement::IndexedAssign { array, index, expr } => {
+                let array_name = match &**array {
+                    Expr::Variable(name) => name,
+                    _ => {
+                        return Err(CompileError::Codegen(
+                            "Array in indexed assignment must be a variable".into(),
+                        ));
+                    }
+                };
+                let array_ptr = self
+                    .variables
+                    .get(array_name)
+                    .ok_or_else(|| {
+                        CompileError::Codegen(format!("undefined array {}", array_name))
+                    })?
+                    .clone();
+                let idx = self.compile_expr(index)?;
+                let val = self.compile_expr(expr)?;
+                let array_type = self.i32_type.array_type(0);
+                let ptr = unsafe {
+                    self.builder.build_in_bounds_gep(
+                        array_type,
+                        array_ptr,
+                        &[self.i32_type.const_int(0, false), idx],
+                        "index_ptr",
+                    )?
                 };
                 self.builder.build_store(ptr, val)?;
             }
@@ -253,6 +276,31 @@ impl<'ctx> CodeGen<'ctx> {
         Ok(())
     }
 
+    fn compile_array_literal(
+        &mut self,
+        elems: &[Expr],
+        name: &str,
+    ) -> Result<PointerValue<'ctx>, CompileError> {
+        let array_type = self.i32_type.array_type(elems.len() as u32);
+        let alloca = self.builder.build_alloca(array_type, name)?;
+        for (i, elem) in elems.iter().enumerate() {
+            let val = self.compile_expr(elem)?;
+            let ptr = unsafe {
+                self.builder.build_in_bounds_gep(
+                    array_type,
+                    alloca,
+                    &[
+                        self.i32_type.const_int(0, false),
+                        self.i32_type.const_int(i as u64, false),
+                    ],
+                    "elem_ptr",
+                )?
+            };
+            self.builder.build_store(ptr, val)?;
+        }
+        Ok(alloca)
+    }
+
     fn compile_expr(&mut self, expr: &Expr) -> Result<IntValue<'ctx>, CompileError> {
         match expr {
             Expr::Number(n) => Ok(self.i32_type.const_int(*n as u64, true)),
@@ -331,27 +379,11 @@ impl<'ctx> CodeGen<'ctx> {
                     .into_int_value())
             }
             Expr::ArrayLiteral(elems) => {
-                let array_type = self.i32_type.array_type(elems.len() as u32);
-                let alloca = self.builder.build_alloca(array_type, "array")?;
-                for (i, elem) in elems.iter().enumerate() {
-                    let val = self.compile_expr(elem)?;
-                    let ptr = unsafe {
-                        self.builder.build_in_bounds_gep(
-                            array_type,
-                            alloca,
-                            &[
-                                self.i32_type.const_int(0, false),
-                                self.i32_type.const_int(i as u64, false),
-                            ],
-                            "elem_ptr",
-                        )?
-                    };
-                    self.builder.build_store(ptr, val)?;
-                }
-                let cast = self
-                    .builder
-                    .build_bit_cast(alloca, self.i32_type, "array_to_i32")?;
-                Ok(cast.into_int_value())
+                let array_ptr = self.compile_array_literal(elems, "array")?;
+                let cast =
+                    self.builder
+                        .build_ptr_to_int(array_ptr, self.i32_type, "array_to_i32")?;
+                Ok(cast)
             }
             Expr::Index { array, index } => {
                 let array_name = match &**array {
@@ -368,9 +400,9 @@ impl<'ctx> CodeGen<'ctx> {
                     .ok_or_else(|| {
                         CompileError::Codegen(format!("undefined array {}", array_name))
                     })?
-                    .clone(); // Clone to drop the borrow
+                    .clone();
                 let idx = self.compile_expr(index)?;
-                let array_type = self.i32_type.array_type(0); // Size 0 for dynamic array
+                let array_type = self.i32_type.array_type(0);
                 let ptr = unsafe {
                     self.builder.build_in_bounds_gep(
                         array_type,
@@ -383,8 +415,8 @@ impl<'ctx> CodeGen<'ctx> {
                 Ok(loaded.into_int_value())
             }
             Expr::Length { array } => {
-                let _ = match &**array {
-                    Expr::Variable(name) => name,
+                match &**array {
+                    Expr::Variable(_) => {}
                     _ => {
                         return Err(CompileError::Codegen(
                             "Length must be called on a variable".into(),
@@ -414,7 +446,6 @@ impl<'ctx> CodeGen<'ctx> {
     }
 }
 
-// Helper method to get array length for Expr
 impl Expr {
     fn array_len(&self) -> Option<usize> {
         match self {
