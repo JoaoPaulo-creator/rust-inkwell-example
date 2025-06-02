@@ -36,9 +36,12 @@ pub enum Token {
     RParen,
     LBrace,
     RBrace,
+    LBracket,
+    RBracket,
     Comma,
     Semicolon,
     // Special
+    Dot,
     EOF,
 }
 
@@ -140,6 +143,18 @@ pub fn lex(input: &str) -> Result<Vec<Token>, CompileError> {
             ';' => {
                 chars.next();
                 tokens.push(Token::Semicolon);
+            }
+            '[' => {
+                chars.next();
+                tokens.push(Token::LBracket);
+            }
+            ']' => {
+                chars.next();
+                tokens.push(Token::RBracket);
+            }
+            '.' => {
+                chars.next();
+                tokens.push(Token::Dot);
             }
             // String literal
             '"' => {

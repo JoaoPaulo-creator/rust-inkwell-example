@@ -270,44 +270,46 @@ impl Parser {
     }
 
     fn parse_factor(&mut self) -> Result<Expr, CompileError> {
-        match self.peek() {
-            Token::Plus => {
-                self.eat();
-                let e = self.parse_factor()?;
-                Ok(Expr::Unary {
-                    op: UnOp::Pos,
-                    expr: Box::new(e),
-                })
-            }
-            Token::Minus => {
-                self.eat();
-                let e = self.parse_factor()?;
-                Ok(Expr::Unary {
-                    op: UnOp::Neg,
-                    expr: Box::new(e),
-                })
+        // 1) Parse “primary”:
+        let mut node = match self.peek() {
+            Token::LBracket => {
+                self.eat(); // consume '['
+                let mut elems = Vec::new();
+                if *self.peek() != Token::RBracket {
+                    loop {
+                        let e = self.parse_expr()?;
+                        elems.push(e);
+                        if *self.peek() == Token::Comma {
+                            self.eat();
+                            continue;
+                        }
+                        break;
+                    }
+                }
+                self.expect(Token::RBracket)?;
+                Expr::ArrayLiteral(elems)
             }
             Token::Number(n) => {
                 let v = *n;
                 self.eat();
-                Ok(Expr::Number(v))
+                Expr::Number(v)
             }
             Token::BoolLiteral(b) => {
                 let v = *b;
                 self.eat();
-                Ok(Expr::Bool(v))
+                Expr::Bool(v)
             }
             Token::StrLiteral(s) => {
                 let v = s.clone();
                 self.eat();
-                Ok(Expr::StrLiteral(v))
+                Expr::StrLiteral(v)
             }
             Token::Ident(name) => {
                 let name = name.clone();
                 self.eat();
-                // function call?
                 if *self.peek() == Token::LParen {
-                    self.eat();
+                    // function call
+                    self.eat(); // '('
                     let mut args = Vec::new();
                     if *self.peek() != Token::RParen {
                         loop {
@@ -320,21 +322,60 @@ impl Parser {
                         }
                     }
                     self.expect(Token::RParen)?;
-                    Ok(Expr::Call { name, args })
+                    Expr::Call { name, args }
                 } else {
-                    Ok(Expr::Variable(name))
+                    Expr::Variable(name)
                 }
             }
             Token::LParen => {
                 self.eat();
                 let e = self.parse_expr()?;
                 self.expect(Token::RParen)?;
-                Ok(e)
+                e
             }
-            other => Err(CompileError::Parse(format!(
-                "Unexpected token in factor: {:?}",
-                other
-            ))),
+            other => {
+                return Err(CompileError::Parse(format!(
+                    "Unexpected token in factor: {:?}",
+                    other
+                )));
+            }
+        };
+
+        // 2) Postfix “index” or “.length()” chaining:
+        loop {
+            match self.peek() {
+                Token::LBracket => {
+                    self.eat();
+                    let idx = self.parse_expr()?;
+                    self.expect(Token::RBracket)?;
+                    node = Expr::Index {
+                        array: Box::new(node),
+                        index: Box::new(idx),
+                    };
+                }
+                Token::Dot => {
+                    self.eat();
+                    match self.peek() {
+                        Token::Ident(method_name) if method_name == "length" => {
+                            self.eat();
+                            self.expect(Token::LParen)?;
+                            self.expect(Token::RParen)?;
+                            node = Expr::Length {
+                                array: Box::new(node),
+                            };
+                        }
+                        other => {
+                            return Err(CompileError::Parse(format!(
+                                "Unexpected token after '.', expected 'length', found {:?}",
+                                other
+                            )));
+                        }
+                    }
+                }
+                _ => break,
+            }
         }
+
+        Ok(node)
     }
 }

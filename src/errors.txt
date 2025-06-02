@@ -1,111 +1,211 @@
-Compiling toy_compiler v0.1.0 (/home/joao/www/toy-lang)
-warning: unused import: `BuilderError`
- --> src/codegen.rs:5:24
-  |
-5 |     builder::{Builder, BuilderError},
-  |                        ^^^^^^^^^^^^
-  |
-  = note: `#[warn(unused_imports)]` on by default
-
+cargo build -j 12
+   Compiling toy_compiler v0.1.0 (/home/joao/www/toy-lang)
 warning: use of deprecated method `inkwell::types::IntType::<'ctx>::ptr_type`: Starting from version 15.0, LLVM doesn't differentiate between pointer types. Use Context::ptr_type instead.
-  --> src/codegen.rs:28:36
-   |
-28 |         let i8_ptr = ctx.i8_type().ptr_type(AddressSpace::default());
-   |                                    ^^^^^^^^
-   |
-   = note: `#[warn(deprecated)]` on by default
-
-error[E0308]: mismatched types
-    --> src/codegen.rs:160:47
-     |
-160  |                     .build_conditional_branch(cond_i1, then_bb, else_bb)?;
-     |                      ------------------------ ^^^^^^^ expected `IntValue<'_>`, found `Result<IntValue<'_>, BuilderError>`
-     |                      |
-     |                      arguments to this method are incorrect
-     |
-     = note: expected struct `inkwell::values::IntValue<'_>`
-                  found enum `Result<inkwell::values::IntValue<'_>, BuilderError>`
-note: method defined here
-    --> /home/joao/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/inkwell-0.6.0/src/builder.rs:2823:12
-     |
-2823 |     pub fn build_conditional_branch(
-     |            ^^^^^^^^^^^^^^^^^^^^^^^^
-help: use the `?` operator to extract the `Result<inkwell::values::IntValue<'_>, BuilderError>` value, propagating a `Result::Err` value to the caller
-     |
-160  |                     .build_conditional_branch(cond_i1?, then_bb, else_bb)?;
-     |                                                      +
-
-error[E0308]: mismatched types
-    --> src/codegen.rs:214:47
-     |
-214  |                     .build_conditional_branch(cond_i1, body_bb, after_bb);
-     |                      ------------------------ ^^^^^^^ expected `IntValue<'_>`, found `Result<IntValue<'_>, BuilderError>`
-     |                      |
-     |                      arguments to this method are incorrect
-     |
-     = note: expected struct `inkwell::values::IntValue<'_>`
-                  found enum `Result<inkwell::values::IntValue<'_>, BuilderError>`
-note: method defined here
-    --> /home/joao/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/inkwell-0.6.0/src/builder.rs:2823:12
-     |
-2823 |     pub fn build_conditional_branch(
-     |            ^^^^^^^^^^^^^^^^^^^^^^^^
-help: use the `?` operator to extract the `Result<inkwell::values::IntValue<'_>, BuilderError>` value, propagating a `Result::Err` value to the caller
-     |
-214  |                     .build_conditional_branch(cond_i1?, body_bb, after_bb);
-     |                                                      +
-
-warning: use of deprecated method `inkwell::types::IntType::<'ctx>::ptr_type`: Starting from version 15.0, LLVM doesn't differentiate between pointer types. Use Context::ptr_type instead.
-   --> src/codegen.rs:264:39
+   --> src/codegen.rs:380:39
     |
-264 |                         self.i32_type.ptr_type(AddressSpace::default()).into(),
+380 |                         self.i32_type.ptr_type(AddressSpace::default()).into(),
     |                                       ^^^^^^^^
+    |
+    = note: `#[warn(deprecated)]` on by default
 
-error[E0308]: `match` arms have incompatible types
-   --> src/codegen.rs:300:34
-    |
-294 |                   let rv = match op {
-    |  __________________________-
-295 | |                     BinOp::Add => self.builder.build_int_add(l, r, "addtmp"),
-296 | |                     BinOp::Sub => self.builder.build_int_sub(l, r, "subtmp"),
-297 | |                     BinOp::Mul => self.builder.build_int_mul(l, r, "multmp"),
-298 | |                     BinOp::Div => self.builder.build_int_signed_div(l, r, "divtmp"),
-299 | |                     BinOp::Rem => self.builder.build_int_signed_rem(l, r, "remtmp"),
-    | |                                   ------------------------------------------------- this and all prior arms are found to be of type `Result<inkwell::values::IntValue<'_>, BuilderError>`
-300 | |                     BinOp::Lt => self.build_int_cmp(IntPredicate::SLT, l, r, "lttmp")?,
-    | |                                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ expected `Result<IntValue<'_>, BuilderError>`, found `IntValue<'_>`
-...   |
-305 | |                     BinOp::Ne => self.build_int_cmp(IntPredicate::NE, l, r, "netmp")?,
-306 | |                 };
-    | |_________________- `match` arms have incompatible types
-    |
-    = note: expected enum `Result<inkwell::values::IntValue<'_>, BuilderError>`
-             found struct `inkwell::values::IntValue<'_>`
-help: try wrapping the expression in `Ok`
-    |
-300 |                     BinOp::Lt => Ok(self.build_int_cmp(IntPredicate::SLT, l, r, "lttmp")?),
-    |                                  +++                                                     +
+error[E0277]: the trait bound `inkwell::values::PointerValue<'_>: BasicType<'_>` is not satisfied
+    --> src/codegen.rs:390:36
+     |
+390  |                         .build_gep(arr_ptr_i32, false, &[zero_idx], "gep_len_slot")?
+     |                          --------- ^^^^^^^^^^^ the trait `BasicType<'_>` is not implemented for `inkwell::values::PointerValue<'_>`
+     |                          |
+     |                          required by a bound introduced by this call
+     |
+     = help: the following other types implement trait `BasicType<'ctx>`:
+               BasicTypeEnum<'ctx>
+               inkwell::types::ArrayType<'ctx>
+               inkwell::types::FloatType<'ctx>
+               inkwell::types::IntType<'ctx>
+               inkwell::types::PointerType<'ctx>
+               inkwell::types::ScalableVectorType<'ctx>
+               inkwell::types::StructType<'ctx>
+               inkwell::types::VectorType<'ctx>
+note: required by a bound in `inkwell::builder::Builder::<'ctx>::build_gep`
+    --> /home/joao/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/inkwell-0.6.0/src/builder.rs:1127:32
+     |
+1127 |     pub unsafe fn build_gep<T: BasicType<'ctx>>(
+     |                                ^^^^^^^^^^^^^^^ required by this bound in `Builder::<'ctx>::build_gep`
 
-error[E0599]: no method named `try_as_basic_value` found for enum `Result` in the current scope
-   --> src/codegen.rs:321:22
-    |
-320 |                   Ok(call_site
-    |  ____________________-
-321 | |                     .try_as_basic_value()
-    | |                     -^^^^^^^^^^^^^^^^^^ method not found in `Result<CallSiteValue<'_>, BuilderError>`
-    | |_____________________|
-    |
-    |
-note: the method `try_as_basic_value` exists on the type `CallSiteValue<'_>`
-   --> /home/joao/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/inkwell-0.6.0/src/values/call_site_value.rs:165:5
-    |
-165 |     pub fn try_as_basic_value(self) -> Either<BasicValueEnum<'ctx>, InstructionValue<'ctx>> {
-    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-help: use the `?` operator to extract the `CallSiteValue<'_>` value, propagating a `Result::Err` value to the caller
-    |
-320 |                 Ok(call_site?
-    |                             +
+error[E0308]: mismatched types
+    --> src/codegen.rs:390:49
+     |
+390  |                         .build_gep(arr_ptr_i32, false, &[zero_idx], "gep_len_slot")?
+     |                          ---------              ^^^^^ expected `PointerValue<'_>`, found `bool`
+     |                          |
+     |                          arguments to this method are incorrect
+     |
+note: method defined here
+    --> /home/joao/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/inkwell-0.6.0/src/builder.rs:1127:19
+     |
+1127 |     pub unsafe fn build_gep<T: BasicType<'ctx>>(
+     |                   ^^^^^^^^^
 
-Some errors have detailed explanations: E0308, E0599.
-For more information about an error, try `rustc --explain E0308`.
+error[E0277]: the trait bound `inkwell::values::PointerValue<'_>: BasicType<'_>` is not satisfied
+    --> src/codegen.rs:399:40
+     |
+399  | ...                   .build_gep(arr_ptr_i32, false, &[data_idx], "gep_elem")?
+     |                        --------- ^^^^^^^^^^^ the trait `BasicType<'_>` is not implemented for `inkwell::values::PointerValue<'_>`
+     |                        |
+     |                        required by a bound introduced by this call
+     |
+     = help: the following other types implement trait `BasicType<'ctx>`:
+               BasicTypeEnum<'ctx>
+               inkwell::types::ArrayType<'ctx>
+               inkwell::types::FloatType<'ctx>
+               inkwell::types::IntType<'ctx>
+               inkwell::types::PointerType<'ctx>
+               inkwell::types::ScalableVectorType<'ctx>
+               inkwell::types::StructType<'ctx>
+               inkwell::types::VectorType<'ctx>
+note: required by a bound in `inkwell::builder::Builder::<'ctx>::build_gep`
+    --> /home/joao/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/inkwell-0.6.0/src/builder.rs:1127:32
+     |
+1127 |     pub unsafe fn build_gep<T: BasicType<'ctx>>(
+     |                                ^^^^^^^^^^^^^^^ required by this bound in `Builder::<'ctx>::build_gep`
+
+error[E0308]: mismatched types
+    --> src/codegen.rs:399:53
+     |
+399  | ...                   .build_gep(arr_ptr_i32, false, &[data_idx], "gep_elem")?
+     |                        ---------              ^^^^^ expected `PointerValue<'_>`, found `bool`
+     |                        |
+     |                        arguments to this method are incorrect
+     |
+note: method defined here
+    --> /home/joao/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/inkwell-0.6.0/src/builder.rs:1127:19
+     |
+1127 |     pub unsafe fn build_gep<T: BasicType<'ctx>>(
+     |                   ^^^^^^^^^
+
+error[E0277]: the trait bound `inkwell::values::PointerValue<'_>: BasicType<'_>` is not satisfied
+    --> src/codegen.rs:408:36
+     |
+408  |                         .build_gep(arr_ptr_i32, false, &[one_idx], "data_ptr")?
+     |                          --------- ^^^^^^^^^^^ the trait `BasicType<'_>` is not implemented for `inkwell::values::PointerValue<'_>`
+     |                          |
+     |                          required by a bound introduced by this call
+     |
+     = help: the following other types implement trait `BasicType<'ctx>`:
+               BasicTypeEnum<'ctx>
+               inkwell::types::ArrayType<'ctx>
+               inkwell::types::FloatType<'ctx>
+               inkwell::types::IntType<'ctx>
+               inkwell::types::PointerType<'ctx>
+               inkwell::types::ScalableVectorType<'ctx>
+               inkwell::types::StructType<'ctx>
+               inkwell::types::VectorType<'ctx>
+note: required by a bound in `inkwell::builder::Builder::<'ctx>::build_gep`
+    --> /home/joao/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/inkwell-0.6.0/src/builder.rs:1127:32
+     |
+1127 |     pub unsafe fn build_gep<T: BasicType<'ctx>>(
+     |                                ^^^^^^^^^^^^^^^ required by this bound in `Builder::<'ctx>::build_gep`
+
+error[E0308]: mismatched types
+    --> src/codegen.rs:408:49
+     |
+408  |                         .build_gep(arr_ptr_i32, false, &[one_idx], "data_ptr")?
+     |                          ---------              ^^^^^ expected `PointerValue<'_>`, found `bool`
+     |                          |
+     |                          arguments to this method are incorrect
+     |
+note: method defined here
+    --> /home/joao/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/inkwell-0.6.0/src/builder.rs:1127:19
+     |
+1127 |     pub unsafe fn build_gep<T: BasicType<'ctx>>(
+     |                   ^^^^^^^^^
+
+warning: use of deprecated method `inkwell::types::IntType::<'ctx>::ptr_type`: Starting from version 15.0, LLVM doesn't differentiate between pointer types. Use Context::ptr_type instead.
+   --> src/codegen.rs:423:35
+    |
+423 |                     self.i32_type.ptr_type(AddressSpace::default()),
+    |                                   ^^^^^^^^
+
+error[E0277]: the trait bound `inkwell::values::PointerValue<'_>: BasicType<'_>` is not satisfied
+    --> src/codegen.rs:433:36
+     |
+433  |                         .build_gep(arr_ptr, false, &[idx_val], "elem_ptr")?
+     |                          --------- ^^^^^^^ the trait `BasicType<'_>` is not implemented for `inkwell::values::PointerValue<'_>`
+     |                          |
+     |                          required by a bound introduced by this call
+     |
+     = help: the following other types implement trait `BasicType<'ctx>`:
+               BasicTypeEnum<'ctx>
+               inkwell::types::ArrayType<'ctx>
+               inkwell::types::FloatType<'ctx>
+               inkwell::types::IntType<'ctx>
+               inkwell::types::PointerType<'ctx>
+               inkwell::types::ScalableVectorType<'ctx>
+               inkwell::types::StructType<'ctx>
+               inkwell::types::VectorType<'ctx>
+note: required by a bound in `inkwell::builder::Builder::<'ctx>::build_gep`
+    --> /home/joao/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/inkwell-0.6.0/src/builder.rs:1127:32
+     |
+1127 |     pub unsafe fn build_gep<T: BasicType<'ctx>>(
+     |                                ^^^^^^^^^^^^^^^ required by this bound in `Builder::<'ctx>::build_gep`
+
+error[E0308]: mismatched types
+    --> src/codegen.rs:433:45
+     |
+433  |                         .build_gep(arr_ptr, false, &[idx_val], "elem_ptr")?
+     |                          ---------          ^^^^^ expected `PointerValue<'_>`, found `bool`
+     |                          |
+     |                          arguments to this method are incorrect
+     |
+note: method defined here
+    --> /home/joao/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/inkwell-0.6.0/src/builder.rs:1127:19
+     |
+1127 |     pub unsafe fn build_gep<T: BasicType<'ctx>>(
+     |                   ^^^^^^^^^
+
+warning: use of deprecated method `inkwell::types::IntType::<'ctx>::ptr_type`: Starting from version 15.0, LLVM doesn't differentiate between pointer types. Use Context::ptr_type instead.
+   --> src/codegen.rs:450:35
+    |
+450 |                     self.i32_type.ptr_type(AddressSpace::default()),
+    |                                   ^^^^^^^^
+
+error[E0277]: the trait bound `inkwell::values::PointerValue<'_>: BasicType<'_>` is not satisfied
+    --> src/codegen.rs:458:36
+     |
+458  |                         .build_gep(arr_ptr, false, &[neg_one], "len_ptr")?
+     |                          --------- ^^^^^^^ the trait `BasicType<'_>` is not implemented for `inkwell::values::PointerValue<'_>`
+     |                          |
+     |                          required by a bound introduced by this call
+     |
+     = help: the following other types implement trait `BasicType<'ctx>`:
+               BasicTypeEnum<'ctx>
+               inkwell::types::ArrayType<'ctx>
+               inkwell::types::FloatType<'ctx>
+               inkwell::types::IntType<'ctx>
+               inkwell::types::PointerType<'ctx>
+               inkwell::types::ScalableVectorType<'ctx>
+               inkwell::types::StructType<'ctx>
+               inkwell::types::VectorType<'ctx>
+note: required by a bound in `inkwell::builder::Builder::<'ctx>::build_gep`
+    --> /home/joao/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/inkwell-0.6.0/src/builder.rs:1127:32
+     |
+1127 |     pub unsafe fn build_gep<T: BasicType<'ctx>>(
+     |                                ^^^^^^^^^^^^^^^ required by this bound in `Builder::<'ctx>::build_gep`
+
+error[E0308]: mismatched types
+    --> src/codegen.rs:458:45
+     |
+458  |                         .build_gep(arr_ptr, false, &[neg_one], "len_ptr")?
+     |                          ---------          ^^^^^ expected `PointerValue<'_>`, found `bool`
+     |                          |
+     |                          arguments to this method are incorrect
+     |
+note: method defined here
+    --> /home/joao/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/inkwell-0.6.0/src/builder.rs:1127:19
+     |
+1127 |     pub unsafe fn build_gep<T: BasicType<'ctx>>(
+     |                   ^^^^^^^^^
+
+Some errors have detailed explanations: E0277, E0308.
+For more information about an error, try `rustc --explain E0277`.
 warning: `toy_compiler` (bin "toy_compiler") generated 3 warnings
+error: could not compile `toy_compiler` (bin "toy_compiler") due to 10 previous errors; 3 warnings emitted

@@ -66,6 +66,14 @@ pub enum Expr {
         name: String,
         args: Vec<Expr>,
     },
+    ArrayLiteral(Vec<Expr>),
+    Index {
+        array: Box<Expr>,
+        index: Box<Expr>,
+    },
+    Length {
+        array: Box<Expr>,
+    },
 }
 
 /// Unary operators: + and -.
