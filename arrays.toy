@@ -1,5 +1,7 @@
-let a = [1, 4, 98, 102, 3];
-print(a.length());
-print(a[2]);
-a[0] = 10;
-print(a[0]);
+fn makeArray(arr) {
+    let a = arr;
+    return a.length();
+}
+
+let array = [1, 2, 3];
+print makeArray(array);
