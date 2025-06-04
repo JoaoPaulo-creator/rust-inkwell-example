@@ -226,18 +226,19 @@ impl<'ctx> CodeGen<'ctx> {
                 let size = function.get_nth_param(param_idx + 1).ok_or_else(|| {
                     CompileError::Codegen(format!("missing array size param for {}", pname))
                 })?;
-                let size_val = size
-                    .into_int_value()
-                    .get_sign_extended_constant()
-                    .ok_or_else(|| {
-                        CompileError::Codegen(format!("array size for {} must be constant", pname))
-                    })?;
                 let alloca = self
                     .builder
                     .build_alloca(self.context.ptr_type(AddressSpace::default()), pname)?;
                 self.builder.build_store(alloca, ptr)?;
                 self.variables.insert(pname.clone(), alloca);
-                self.array_sizes.insert(pname.clone(), size_val as usize);
+                // Store size as a variable
+                let size_alloca = self
+                    .builder
+                    .build_alloca(self.i32_type, &format!("{}_size", pname))?;
+                self.builder.build_store(size_alloca, size)?;
+                self.variables
+                    .insert(format!("{}_size", pname), size_alloca);
+                self.array_sizes.insert(pname.clone(), 0); // Placeholder, updated later
                 param_idx += 2;
             } else {
                 let ptr = self.builder.build_alloca(self.i32_type, pname)?;
@@ -296,10 +297,24 @@ impl<'ctx> CodeGen<'ctx> {
                             .builder
                             .build_alloca(self.context.ptr_type(AddressSpace::default()), name)?;
                         self.builder.build_store(ptr, array_ptr)?;
-                        let size = *self.array_sizes.get(var_name).ok_or_else(|| {
-                            CompileError::Codegen(format!("Array size not found for {}", var_name))
-                        })?;
-                        self.array_sizes.insert(name.clone(), size);
+                        let size_ptr = self
+                            .variables
+                            .get(&format!("{}_size", var_name))
+                            .ok_or_else(|| {
+                                CompileError::Codegen(format!(
+                                    "undefined array size for {}",
+                                    var_name
+                                ))
+                            })?;
+                        let size =
+                            self.builder
+                                .build_load(self.i32_type, *size_ptr, "load_size")?;
+                        let size_alloca = self
+                            .builder
+                            .build_alloca(self.i32_type, &format!("{}_size", name))?;
+                        self.builder.build_store(size_alloca, size)?;
+                        self.variables.insert(format!("{}_size", name), size_alloca);
+                        self.array_sizes.insert(name.clone(), 0); // Placeholder
                         ptr
                     } else {
                         let val = self.compile_expr(expr)?;
@@ -724,10 +739,16 @@ impl<'ctx> CodeGen<'ctx> {
                         ));
                     }
                 };
-                let size = *self.array_sizes.get(array_name).ok_or_else(|| {
-                    CompileError::Codegen(format!("undefined array {}", array_name))
-                })?;
-                Ok(self.i32_type.const_int(size as u64, false))
+                let size_ptr = self
+                    .variables
+                    .get(&format!("{}_size", array_name))
+                    .ok_or_else(|| {
+                        CompileError::Codegen(format!("undefined array size for {}", array_name))
+                    })?;
+                let size = self
+                    .builder
+                    .build_load(self.i32_type, *size_ptr, "load_size")?;
+                Ok(size.into_int_value())
             }
         }
     }

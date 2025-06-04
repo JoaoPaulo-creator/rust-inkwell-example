@@ -1,6 +1,17 @@
-fn makeArray(arr) {
-    return arr.length();
+fn twoSum(arr, target) {
+        let left = 0;
+        let right = arr.length() - 1;
+
+        while (left < right) {
+                let sum = arr[left] + arr[right];
+                if (sum == target) {
+                        return sum;
+                } else {
+                        left = left + 1;
+                        right = right - 1;
+                }
+        }
 }
 
-let array = [1, 2, 3];
-print makeArray(array);
+let arr = [1, 2, 3, 4, 5];
+print(twoSum(arr, 6));
