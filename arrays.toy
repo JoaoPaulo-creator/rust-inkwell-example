@@ -1,6 +1,5 @@
 fn makeArray(arr) {
-    let a = arr;
-    return a.length();
+    return arr.length();
 }
 
 let array = [1, 2, 3];

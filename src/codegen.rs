@@ -80,11 +80,11 @@ impl<'ctx> CodeGen<'ctx> {
             // Analyze calls to this function for parameter types
             for other_func in &prog.functions {
                 for stmt in &other_func.body {
-                    self.analyze_stmt_for_calls(&func.name, &mut param_is_array, stmt)?;
+                    self.analyze_stmt_for_calls(&func.name, &mut param_is_array, stmt, prog)?;
                 }
             }
             for stmt in &prog.statements {
-                self.analyze_stmt_for_calls(&func.name, &mut param_is_array, stmt)?;
+                self.analyze_stmt_for_calls(&func.name, &mut param_is_array, stmt, prog)?;
             }
 
             self.function_types
@@ -98,42 +98,43 @@ impl<'ctx> CodeGen<'ctx> {
         func_name: &str,
         param_is_array: &mut [bool],
         stmt: &Statement,
+        prog: &Program,
     ) -> Result<(), CompileError> {
         match stmt {
             Statement::ExprStmt(expr) | Statement::Return { expr } | Statement::Print { expr } => {
-                self.analyze_expr_for_calls(func_name, param_is_array, expr)?;
+                self.analyze_expr_for_calls(func_name, param_is_array, expr, prog)?;
             }
             Statement::VarDecl { expr, .. }
             | Statement::LetDecl { expr, .. }
             | Statement::Assign { expr, .. } => {
-                self.analyze_expr_for_calls(func_name, param_is_array, expr)?;
+                self.analyze_expr_for_calls(func_name, param_is_array, expr, prog)?;
             }
             Statement::IndexedAssign {
                 array, index, expr, ..
             } => {
-                self.analyze_expr_for_calls(func_name, param_is_array, array)?;
-                self.analyze_expr_for_calls(func_name, param_is_array, index)?;
-                self.analyze_expr_for_calls(func_name, param_is_array, expr)?;
+                self.analyze_expr_for_calls(func_name, param_is_array, array, prog)?;
+                self.analyze_expr_for_calls(func_name, param_is_array, index, prog)?;
+                self.analyze_expr_for_calls(func_name, param_is_array, expr, prog)?;
             }
             Statement::If {
                 cond,
                 then_branch,
                 else_branch,
             } => {
-                self.analyze_expr_for_calls(func_name, param_is_array, cond)?;
+                self.analyze_expr_for_calls(func_name, param_is_array, cond, prog)?;
                 for s in then_branch {
-                    self.analyze_stmt_for_calls(func_name, param_is_array, s)?;
+                    self.analyze_stmt_for_calls(func_name, param_is_array, s, prog)?;
                 }
                 if let Some(else_branch) = else_branch {
                     for s in else_branch {
-                        self.analyze_stmt_for_calls(func_name, param_is_array, s)?;
+                        self.analyze_stmt_for_calls(func_name, param_is_array, s, prog)?;
                     }
                 }
             }
             Statement::While { cond, body } => {
-                self.analyze_expr_for_calls(func_name, param_is_array, cond)?;
+                self.analyze_expr_for_calls(func_name, param_is_array, cond, prog)?;
                 for s in body {
-                    self.analyze_stmt_for_calls(func_name, param_is_array, s)?;
+                    self.analyze_stmt_for_calls(func_name, param_is_array, s, prog)?;
                 }
             }
         }
@@ -145,6 +146,7 @@ impl<'ctx> CodeGen<'ctx> {
         func_name: &str,
         param_is_array: &mut [bool],
         expr: &Expr,
+        prog: &Program,
     ) -> Result<(), CompileError> {
         match expr {
             Expr::Call { name, args } if name == func_name => {
@@ -162,19 +164,27 @@ impl<'ctx> CodeGen<'ctx> {
                     }
                 }
             }
+            Expr::Length { array } => {
+                if let Expr::Variable(var) = &**array {
+                    // Check if the variable is a parameter of the function
+                    if let Some(func) = prog.functions.iter().find(|f| f.name == func_name) {
+                        if let Some(idx) = func.params.iter().position(|p| p == var) {
+                            param_is_array[idx] = true;
+                        }
+                    }
+                    self.analyze_expr_for_calls(func_name, param_is_array, array, prog)?;
+                }
+            }
             Expr::Unary { expr, .. } => {
-                self.analyze_expr_for_calls(func_name, param_is_array, expr)?;
+                self.analyze_expr_for_calls(func_name, param_is_array, expr, prog)?;
             }
             Expr::Binary { left, right, .. } => {
-                self.analyze_expr_for_calls(func_name, param_is_array, left)?;
-                self.analyze_expr_for_calls(func_name, param_is_array, right)?;
+                self.analyze_expr_for_calls(func_name, param_is_array, left, prog)?;
+                self.analyze_expr_for_calls(func_name, param_is_array, right, prog)?;
             }
             Expr::Index { array, index } => {
-                self.analyze_expr_for_calls(func_name, param_is_array, array)?;
-                self.analyze_expr_for_calls(func_name, param_is_array, index)?;
-            }
-            Expr::Length { array } => {
-                self.analyze_expr_for_calls(func_name, param_is_array, array)?;
+                self.analyze_expr_for_calls(func_name, param_is_array, array, prog)?;
+                self.analyze_expr_for_calls(func_name, param_is_array, index, prog)?;
             }
             _ => {}
         }
