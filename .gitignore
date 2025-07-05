@@ -1,1 +1,4 @@
 /target
+*.o 
+toy_exec
+run

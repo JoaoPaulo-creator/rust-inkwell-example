@@ -288,7 +288,15 @@ impl<'ctx> CodeGen<'ctx> {
                         .builder
                         .build_alloca(self.context.ptr_type(AddressSpace::default()), name)?;
                     self.builder.build_store(ptr, array_ptr)?;
-                    self.array_sizes.insert(name.clone(), elems.len());
+                    // Store the actual array size
+                    let size = elems.len();
+                    self.array_sizes.insert(name.clone(), size); // Fix: Use actual size instead of 0
+                    let size_alloca = self
+                        .builder
+                        .build_alloca(self.i32_type, &format!("{}_size", name))?;
+                    self.builder
+                        .build_store(size_alloca, self.i32_type.const_int(size as u64, false))?;
+                    self.variables.insert(format!("{}_size", name), size_alloca);
                     ptr
                 } else if let Expr::Variable(var_name) = expr {
                     if self.array_sizes.contains_key(var_name) {
@@ -314,7 +322,7 @@ impl<'ctx> CodeGen<'ctx> {
                             .build_alloca(self.i32_type, &format!("{}_size", name))?;
                         self.builder.build_store(size_alloca, size)?;
                         self.variables.insert(format!("{}_size", name), size_alloca);
-                        self.array_sizes.insert(name.clone(), 0); // Placeholder
+                        self.array_sizes.insert(name.clone(), 0); // This is fine for variables, as size is stored separately
                         ptr
                     } else {
                         let val = self.compile_expr(expr)?;
@@ -636,6 +644,36 @@ impl<'ctx> CodeGen<'ctx> {
                 Ok(rv)
             }
             Expr::Call { name, args } => {
+                if name == "length" && args.len() == 1 {
+                    if let Some(size) = args[0].array_len() {
+                        // For literals: use constant directly
+                        return Ok(self.i32_type.const_int(size as u64, false));
+                    } else if let Expr::Variable(var_name) = &args[0] {
+                        if self.array_sizes.contains_key(var_name) {
+                            let ptr = self.load_array_ptr(var_name)?;
+                            let neg_one = self.i32_type.const_int((-1i64) as u64, true);
+                            let len_ptr = unsafe {
+                                self.builder.build_in_bounds_gep(
+                                    self.i32_type,
+                                    ptr,
+                                    &[neg_one],
+                                    "len_ptr",
+                                )?
+                            };
+                            let len = self.builder.build_load(self.i32_type, len_ptr, "len_val")?;
+                            return Ok(len.into_int_value());
+                        }
+                    }
+
+                    return Err(CompileError::Codegen(format!(
+                        "undefined array size for {}",
+                        match &args[0] {
+                            Expr::Variable(v) => v.clone(),
+                            _ => "expression".to_string(),
+                        }
+                    )));
+                }
+
                 let fn_val = self
                     .module
                     .get_function(name)

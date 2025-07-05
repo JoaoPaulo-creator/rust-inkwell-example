@@ -1,17 +1,4 @@
-fn twoSum(arr, target) {
-        let left = 0;
-        let right = arr.length() - 1;
+let arr = [1,2,3];
 
-        while (left < right) {
-                let sum = arr[left] + arr[right];
-                if (sum == target) {
-                        return sum;
-                } else {
-                        left = left + 1;
-                        right = right - 1;
-                }
-        }
-}
-
-let arr = [1, 2, 3, 4, 5];
-print(twoSum(arr, 6));
+print(arr[0]);
+print(arr.length());
