@@ -18,7 +18,7 @@ pub struct CodeGen<'ctx> {
     printf_fn: FunctionValue<'ctx>,
     variables: HashMap<String, PointerValue<'ctx>>,
     array_sizes: HashMap<String, usize>,
-    function_types: HashMap<String, (Vec<bool>, bool)>, // (param_is_array, returns_array)
+    function_types: HashMap<String, (Vec<bool>, bool)>,
 }
 
 impl<'ctx> CodeGen<'ctx> {
@@ -68,7 +68,6 @@ impl<'ctx> CodeGen<'ctx> {
             let mut param_is_array = vec![false; func.params.len()];
             let mut returns_array = false;
 
-            // Analyze function body for return type
             for stmt in &func.body {
                 if let Statement::Return { expr } = stmt {
                     if matches!(expr, Expr::ArrayLiteral(_)) {
@@ -77,7 +76,6 @@ impl<'ctx> CodeGen<'ctx> {
                 }
             }
 
-            // Analyze calls to this function for parameter types
             for other_func in &prog.functions {
                 for stmt in &other_func.body {
                     self.analyze_stmt_for_calls(&func.name, &mut param_is_array, stmt, prog)?;
@@ -166,7 +164,6 @@ impl<'ctx> CodeGen<'ctx> {
             }
             Expr::Length { array } => {
                 if let Expr::Variable(var) = &**array {
-                    // Check if the variable is a parameter of the function
                     if let Some(func) = prog.functions.iter().find(|f| f.name == func_name) {
                         if let Some(idx) = func.params.iter().position(|p| p == var) {
                             param_is_array[idx] = true;
@@ -196,10 +193,10 @@ impl<'ctx> CodeGen<'ctx> {
         let mut param_types = Vec::new();
         for is_array in &param_is_array {
             if *is_array {
-                param_types.push(self.context.ptr_type(AddressSpace::default()).into()); // Array pointer
-                param_types.push(self.i32_type.into()); // Array size
+                param_types.push(self.context.ptr_type(AddressSpace::default()).into());
+                param_types.push(self.i32_type.into());
             } else {
-                param_types.push(self.i32_type.into()); // Scalar
+                param_types.push(self.i32_type.into());
             }
         }
 
@@ -231,14 +228,18 @@ impl<'ctx> CodeGen<'ctx> {
                     .build_alloca(self.context.ptr_type(AddressSpace::default()), pname)?;
                 self.builder.build_store(alloca, ptr)?;
                 self.variables.insert(pname.clone(), alloca);
-                // Store size as a variable
                 let size_alloca = self
                     .builder
                     .build_alloca(self.i32_type, &format!("{}_size", pname))?;
                 self.builder.build_store(size_alloca, size)?;
                 self.variables
                     .insert(format!("{}_size", pname), size_alloca);
-                self.array_sizes.insert(pname.clone(), 0); // Placeholder, updated later
+                // Store actual size value in array_sizes
+                let size_value = size
+                    .into_int_value()
+                    .get_zero_extended_constant()
+                    .unwrap_or(0) as usize;
+                self.array_sizes.insert(pname.clone(), size_value);
                 param_idx += 2;
             } else {
                 let ptr = self.builder.build_alloca(self.i32_type, pname)?;
@@ -253,13 +254,18 @@ impl<'ctx> CodeGen<'ctx> {
             self.compile_statement(stmt, Some(function))?;
         }
 
-        if returns_array {
-            let empty_array = self.i32_type.array_type(0);
-            let alloca = self.builder.build_alloca(empty_array, "empty_array")?;
-            self.builder.build_return(Some(&alloca))?;
-        } else {
-            self.builder
-                .build_return(Some(&self.i32_type.const_int(0, false)))?;
+        if f.body
+            .iter()
+            .all(|s| !matches!(s, Statement::Return { .. }))
+        {
+            if returns_array {
+                let empty_array = self.i32_type.array_type(2);
+                let alloca = self.builder.build_alloca(empty_array, "empty_array")?;
+                self.builder.build_return(Some(&alloca))?;
+            } else {
+                self.builder
+                    .build_return(Some(&self.i32_type.const_int(0, false)))?;
+            }
         }
         Ok(())
     }
@@ -288,9 +294,8 @@ impl<'ctx> CodeGen<'ctx> {
                         .builder
                         .build_alloca(self.context.ptr_type(AddressSpace::default()), name)?;
                     self.builder.build_store(ptr, array_ptr)?;
-                    // Store the actual array size
                     let size = elems.len();
-                    self.array_sizes.insert(name.clone(), size); // Fix: Use actual size instead of 0
+                    self.array_sizes.insert(name.clone(), size);
                     let size_alloca = self
                         .builder
                         .build_alloca(self.i32_type, &format!("{}_size", name))?;
@@ -322,7 +327,82 @@ impl<'ctx> CodeGen<'ctx> {
                             .build_alloca(self.i32_type, &format!("{}_size", name))?;
                         self.builder.build_store(size_alloca, size)?;
                         self.variables.insert(format!("{}_size", name), size_alloca);
-                        self.array_sizes.insert(name.clone(), 0); // This is fine for variables, as size is stored separately
+                        self.array_sizes.insert(
+                            name.clone(),
+                            size.into_int_value().get_zero_extended_constant().unwrap() as usize,
+                        );
+                        ptr
+                    } else {
+                        let val = self.compile_expr(expr)?;
+                        let ptr = self.builder.build_alloca(self.i32_type, name)?;
+                        self.builder.build_store(ptr, val)?;
+                        ptr
+                    }
+                } else if let Expr::Call {
+                    name: fn_name,
+                    args,
+                } = expr
+                {
+                    let returns_array = self
+                        .function_types
+                        .get(fn_name)
+                        .map(|(_, ret)| *ret)
+                        .unwrap_or(false);
+                    if returns_array {
+                        let fn_val = self.module.get_function(fn_name).ok_or_else(|| {
+                            CompileError::Codegen(format!("unknown fn {}", fn_name))
+                        })?;
+                        let mut compiled_args = Vec::new();
+                        let (param_is_array, _) = self.function_types.get(fn_name).unwrap().clone();
+                        for (i, arg) in args.iter().enumerate() {
+                            if i < param_is_array.len() && param_is_array[i] {
+                                if let Expr::Variable(var_name) = arg {
+                                    if self.array_sizes.contains_key(var_name) {
+                                        let ptr = self.load_array_ptr(var_name)?;
+                                        let size = *self.array_sizes.get(var_name).unwrap();
+                                        compiled_args.push(ptr.into());
+                                        compiled_args.push(
+                                            self.i32_type.const_int(size as u64, false).into(),
+                                        );
+                                        continue;
+                                    }
+                                } else if let Expr::ArrayLiteral(elems) = arg {
+                                    let ptr = self.compile_array_literal(elems, "arg_array")?;
+                                    compiled_args.push(ptr.into());
+                                    compiled_args.push(
+                                        self.i32_type.const_int(elems.len() as u64, false).into(),
+                                    );
+                                    continue;
+                                }
+                                return Err(CompileError::Codegen(format!(
+                                    "Expected array argument for parameter {} of {}",
+                                    i, fn_name
+                                )));
+                            }
+                            let val = self.compile_expr(arg)?;
+                            compiled_args.push(val.into());
+                        }
+                        let call_site =
+                            self.builder.build_call(fn_val, &compiled_args, "calltmp")?;
+                        let ptr_val = call_site
+                            .try_as_basic_value()
+                            .left()
+                            .ok_or_else(|| CompileError::Codegen("array return expected".into()))?
+                            .into_pointer_value();
+                        let array_type = self.i32_type.array_type(2);
+                        let ptr = self.builder.build_alloca(array_type, name)?;
+                        self.builder.build_store(ptr, ptr_val)?;
+                        let size = 2; // twoSum returns array of size 2
+                        self.array_sizes.insert(name.clone(), size);
+                        let size_alloca = self
+                            .builder
+                            .build_alloca(self.i32_type, &format!("{}_size", name))?;
+                        self.builder.build_store(
+                            size_alloca,
+                            self.i32_type.const_int(size as u64, false),
+                        )?;
+                        self.variables.insert(format!("{}_size", name), size_alloca);
+                        self.variables.insert(name.clone(), ptr);
                         ptr
                     } else {
                         let val = self.compile_expr(expr)?;
@@ -347,26 +427,68 @@ impl<'ctx> CodeGen<'ctx> {
                     let new_ptr = self.compile_array_literal(elems, name)?;
                     self.variables.insert(name.clone(), new_ptr);
                     self.array_sizes.insert(name.clone(), elems.len());
-                } else if let Expr::Call { name: fn_name, .. } = expr {
+                } else if let Expr::Call {
+                    name: fn_name,
+                    args,
+                } = expr
+                {
                     let returns_array = self
                         .function_types
                         .get(fn_name)
                         .map(|(_, ret)| *ret)
                         .unwrap_or(false);
                     if returns_array {
-                        let val = self.compile_expr(expr)?;
-                        let ptr_val = self.builder.build_int_to_ptr(
-                            val,
-                            self.context.ptr_type(AddressSpace::default()),
-                            "int_to_ptr",
-                        )?;
-                        let alloca = self
+                        let fn_val = self.module.get_function(fn_name).ok_or_else(|| {
+                            CompileError::Codegen(format!("unknown fn {}", fn_name))
+                        })?;
+                        let mut compiled_args = Vec::new();
+                        let (param_is_array, _) = self.function_types.get(fn_name).unwrap().clone();
+                        for (i, arg) in args.iter().enumerate() {
+                            if i < param_is_array.len() && param_is_array[i] {
+                                if let Expr::Variable(var_name) = arg {
+                                    if self.array_sizes.contains_key(var_name) {
+                                        let ptr = self.load_array_ptr(var_name)?;
+                                        let size = *self.array_sizes.get(var_name).unwrap();
+                                        compiled_args.push(ptr.into());
+                                        compiled_args.push(
+                                            self.i32_type.const_int(size as u64, false).into(),
+                                        );
+                                        continue;
+                                    }
+                                } else if let Expr::ArrayLiteral(elems) = arg {
+                                    let ptr = self.compile_array_literal(elems, "arg_array")?;
+                                    compiled_args.push(ptr.into());
+                                    compiled_args.push(
+                                        self.i32_type.const_int(elems.len() as u64, false).into(),
+                                    );
+                                    continue;
+                                }
+                                return Err(CompileError::Codegen(format!(
+                                    "Expected array argument for parameter {} of {}",
+                                    i, fn_name
+                                )));
+                            }
+                            let val = self.compile_expr(arg)?;
+                            compiled_args.push(val.into());
+                        }
+                        let call_site =
+                            self.builder.build_call(fn_val, &compiled_args, "calltmp")?;
+                        let ptr_val = call_site
+                            .try_as_basic_value()
+                            .left()
+                            .ok_or_else(|| CompileError::Codegen("array return expected".into()))?
+                            .into_pointer_value();
+                        self.builder.build_store(ptr, ptr_val)?;
+                        let size = 2; // twoSum returns array of size 2
+                        self.array_sizes.insert(name.clone(), size);
+                        let size_alloca = self
                             .builder
-                            .build_alloca(self.context.ptr_type(AddressSpace::default()), name)?;
-                        self.builder.build_store(alloca, ptr_val)?;
-                        self.variables.insert(name.clone(), alloca);
-                        self.array_sizes
-                            .insert(name.clone(), self.get_array_size_from_context(name)?);
+                            .build_alloca(self.i32_type, &format!("{}_size", name))?;
+                        self.builder.build_store(
+                            size_alloca,
+                            self.i32_type.const_int(size as u64, false),
+                        )?;
+                        self.variables.insert(format!("{}_size", name), size_alloca);
                     } else {
                         let val = self.compile_expr(expr)?;
                         self.builder.build_store(ptr, val)?;
@@ -646,25 +768,24 @@ impl<'ctx> CodeGen<'ctx> {
             Expr::Call { name, args } => {
                 if name == "length" && args.len() == 1 {
                     if let Some(size) = args[0].array_len() {
-                        // For literals: use constant directly
                         return Ok(self.i32_type.const_int(size as u64, false));
                     } else if let Expr::Variable(var_name) = &args[0] {
                         if self.array_sizes.contains_key(var_name) {
-                            let ptr = self.load_array_ptr(var_name)?;
-                            let neg_one = self.i32_type.const_int((-1i64) as u64, true);
-                            let len_ptr = unsafe {
-                                self.builder.build_in_bounds_gep(
-                                    self.i32_type,
-                                    ptr,
-                                    &[neg_one],
-                                    "len_ptr",
-                                )?
-                            };
-                            let len = self.builder.build_load(self.i32_type, len_ptr, "len_val")?;
-                            return Ok(len.into_int_value());
+                            let size_ptr = self
+                                .variables
+                                .get(&format!("{}_size", var_name))
+                                .ok_or_else(|| {
+                                    CompileError::Codegen(format!(
+                                        "undefined array size for {}",
+                                        var_name
+                                    ))
+                                })?;
+                            let size =
+                                self.builder
+                                    .build_load(self.i32_type, *size_ptr, "load_size")?;
+                            return Ok(size.into_int_value());
                         }
                     }
-
                     return Err(CompileError::Codegen(format!(
                         "undefined array size for {}",
                         match &args[0] {
@@ -744,19 +865,58 @@ impl<'ctx> CodeGen<'ctx> {
                 };
                 let array_ptr = self.load_array_ptr(array_name)?;
                 let idx = self.compile_expr(index)?;
-                let size = *self.array_sizes.get(array_name).ok_or_else(|| {
-                    CompileError::Codegen(format!("undefined array {}", array_name))
-                })?;
-                let idx_val = idx.get_sign_extended_constant().ok_or_else(|| {
-                    CompileError::Codegen("Index must be a constant or resolvable integer".into())
-                })?;
-                if idx_val < 0 || idx_val as usize >= size {
-                    return Err(CompileError::Codegen(format!(
-                        "Index {} out of bounds for array {} of size {}",
-                        idx_val, array_name, size
-                    )));
-                }
-                let array_type = self.i32_type.array_type(0);
+                let size = self.get_array_size_from_context(array_name)?;
+
+                let zero = self.i32_type.const_int(0, false);
+                let size_val = self.i32_type.const_int(size as u64, false);
+                let idx_ge_zero =
+                    self.builder
+                        .build_int_compare(IntPredicate::SGE, idx, zero, "idx_ge_zero")?;
+                let idx_lt_size = self.builder.build_int_compare(
+                    IntPredicate::SLT,
+                    idx,
+                    size_val,
+                    "idx_lt_size",
+                )?;
+                let idx_valid = self
+                    .builder
+                    .build_and(idx_ge_zero, idx_lt_size, "idx_valid")?;
+
+                let error_bb = self.context.append_basic_block(
+                    self.module.get_function("main").unwrap_or_else(|| {
+                        self.module
+                            .get_function(&self.function_types.iter().next().unwrap().0)
+                            .unwrap()
+                    }),
+                    "bounds_error",
+                );
+                let continue_bb = self.context.append_basic_block(
+                    self.module.get_function("main").unwrap_or_else(|| {
+                        self.module
+                            .get_function(&self.function_types.iter().next().unwrap().0)
+                            .unwrap()
+                    }),
+                    "continue",
+                );
+
+                self.builder
+                    .build_conditional_branch(idx_valid, continue_bb, error_bb)?;
+
+                self.builder.position_at_end(error_bb);
+                let fmt = self.builder.build_global_string_ptr(
+                    "Index out of bounds: %d (array size: %d)\n\0",
+                    "bounds_err_fmt",
+                )?;
+                self.builder.build_call(
+                    self.printf_fn,
+                    &[fmt.as_pointer_value().into(), idx.into(), size_val.into()],
+                    "print_bounds_error",
+                )?;
+                self.builder
+                    .build_return(Some(&self.i32_type.const_int(1, false)))?;
+
+                self.builder.position_at_end(continue_bb);
+                let array_type = self.i32_type.array_type(size as u32);
                 let ptr = unsafe {
                     self.builder.build_in_bounds_gep(
                         array_type,

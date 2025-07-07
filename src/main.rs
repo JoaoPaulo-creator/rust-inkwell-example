@@ -28,6 +28,7 @@ fn run() -> Result<(), CompileError> {
     let tokens = lexer::lex(&src)?;
     let mut parser = parser::Parser::new(tokens);
     let prog: Program = parser.parse_program()?;
+    println!("{:#?}", prog);
 
     // codegen
     let ctx = inkwell::context::Context::create();

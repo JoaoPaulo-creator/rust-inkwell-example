@@ -1,7 +1,1 @@
-let a = 1 + 2
-let b = a * 3
-
-print "result of a";
-print a;
-print "result of b";
-print b;
+print("ola, mundo");

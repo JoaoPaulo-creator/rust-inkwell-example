@@ -372,7 +372,7 @@ impl Parser {
                         }
                         other => {
                             return Err(CompileError::Parse(format!(
-                                "Unexpected token after '.', expected 'length', found {:?}",
+                                "Expected 'length' after '.', found {:?}",
                                 other
                             )));
                         }
