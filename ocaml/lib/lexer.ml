@@ -11,12 +11,29 @@ type token =
         | LParen | RParen | LBrace | RBrace | LBracket | RBracket 
         | Comma | Semicolon | Dot | EOF
 
-let is_ident_start c =
-        Char.(is_alpha c || c = '_')
+
+let is_alpha c =
+        let code = Char.code c in 
+        (code >= Char.code 'a' && code <= Char.code 'z') ||
+        (code >= Char.code 'A' && code <= Char.code 'Z') 
+
+let is_alphanum c =
+        is_alpha c || (Char.code c >= Char.code '0' && Char.code c <= Char.code '9')
+
+let is_digit c =
+        c <= '9' || c >= '0'
 
 
-let is_ident_continue c =
-        Char.(is_alphanum c || c = '_')
+let is_whitespace c =
+        match c with 
+        | ' ' | '\t' | '\n' | '\r' -> true
+        | _ -> false
+
+
+
+
+let is_ident_start c = is_alpha c || c = '_'
+let is_ident_continue c = is_alphanum c || c = '_'
 
 let lex input =
         let rec lex' pos acc =
@@ -24,7 +41,7 @@ let lex input =
                 else 
                         let c = input.[pos] in 
                         match c with
-                        | c when Char.is_whitespace c -> lex' ( pos + 1) acc
+                        | c when is_whitespace c -> lex' ( pos + 1) acc
                         | '<' -> 
                                 if pos + 1 < String.length input && input.[pos + 1] = '='
                                 then lex' (pos + 2) (Le :: acc)
@@ -63,20 +80,21 @@ let lex input =
                                 in
                                 let (new_pos, s) = collect_string (pos + 1) "" in 
                                 lex' new_pos ( StrLiteral s :: acc)
-                        | c when Char.is_digit c -> 
+                        | c when is_digit c -> 
                                 let rec collect_number pos' acc =
-                                        if pos' >= String.length input || not (Char.is_digit input.[pos'])
+                                        if pos' >= String.length input || not (is_digit input.[pos'])
                                         then (pos', acc)
                                         else collect_number (pos' + 1) (acc * 10 + (Char.code input.[pos']  - Char.code '0'))
                                 in
                                 let (new_pos, n ) = collect_number pos 0 in
                                 lex' new_pos (Number (Int64.of_int n) :: acc)
                         | c when is_ident_start c ->
-                                let rec collect_ident pos' acc = 
-                                        if pos' >= String.length input || not (is_ident_continue input.[pos'])
+                                let rec collect_ident pos' acc =
+                                        if pos' >= String.length  input || not (is_ident_continue input.[pos']) 
                                         then (pos', acc)
-                                        else collect_ident (pos' + 1) (acc ^ String.make 1 c) 
-                                in
+                                        else collect_ident (pos' + 1) (acc ^ String.make 1 input.[pos'])
+                                in 
+                                let (new_pos, ident) = collect_ident (pos + 1) (String.make 1 c) in 
                                 let token =
                                         match ident with
                                         | "fn" -> Fn
@@ -86,7 +104,7 @@ let lex input =
                                         | "else" -> Else
                                         | "while" -> While
                                         | "return" -> Return
-                                        | "print" -> Print
+                                        | "print" -> Print 
                                         | "true" -> BoolLiteral true
                                         | "false" -> BoolLiteral false
                                         | _ -> Ident ident
@@ -94,5 +112,5 @@ let lex input =
                                 lex' new_pos (token :: acc)
                         | c -> raise (CompileError (Lex (Printf.sprintf "Unexpected character '%c'" c)))
 
-        in 
-        try Ok (lex' 0 []) with CompileError e -> Error e
+in 
+try Ok (lex' 0 []) with CompileError e -> Error e
