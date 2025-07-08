@@ -114,3 +114,42 @@ let lex input =
 
 in 
 try Ok (lex' 0 []) with CompileError e -> Error e
+
+
+(* lexer.ml *)
+
+let string_of_token = function
+  | Fn -> "fn"
+  | Let -> "let"
+  | Var -> "var"
+  | If -> "if"
+  | Else -> "else"
+  | While -> "while"
+  | Return -> "return"
+  | Print -> "print"
+  | Ident s -> Printf.sprintf "identifier '%s'" s
+  | Number n -> Printf.sprintf "number %Ld" n
+  | StrLiteral s -> Printf.sprintf "string literal '%s'" s
+  | BoolLiteral b -> Printf.sprintf "boolean %b" b
+  | Plus -> "+"
+  | Minus -> "-"
+  | Star -> "*"
+  | Slash -> "/"
+  | Percent -> "%"
+  | Lt -> "<"
+  | Le -> "<="
+  | Gt -> ">"
+  | Ge -> ">="
+  | EqEq -> "=="
+  | Ne -> "!="
+  | Eq -> "="
+  | LParen -> "("
+  | RParen -> ")"
+  | LBrace -> "{"
+  | RBrace -> "}"
+  | LBracket -> "["
+  | RBracket -> "]"
+  | Comma -> ","
+  | Semicolon -> ";"
+  | Dot -> "."
+  | EOF -> "EOF"

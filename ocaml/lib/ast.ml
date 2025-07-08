@@ -19,7 +19,7 @@ type expr =
         | StrLiteral of string
         | Variable of string
         | Unary of un_op * expr
-        | Binary of bin_op * expr
+        | Binary of bin_op * expr * expr
         | Call of string * expr list
         | ArrayLiteral of expr list
         | Index of expr * expr
