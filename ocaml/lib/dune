@@ -1,3 +1,6 @@
 (library
- (name toy_ocaml))
+ (name toy_ocaml)
+ (wrapped false)
+ (modules ast error lexer parser codegen)
+ (libraries llvm))
 
