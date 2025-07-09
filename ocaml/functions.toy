@@ -1,0 +1,8 @@
+fn add(x, y) {
+        return x + y;
+}
+
+let z = add(3, 4);
+if (z == 7) {
+        print z;
+}
