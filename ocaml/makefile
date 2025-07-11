@@ -31,9 +31,15 @@ fct:
 	clang program.o -o toy_exec
 	./toy_exec
 
+teste:
+	./_build/default/bin/main.exe test.toy
+	llc -filetype=obj -relocation-model=pic program.ll -o program.o
+	clang program.o -o toy_exec
+	./toy_exec
+
 
 while:
-	./target/debug/toy_compiler arrays.toy
+	./_build/default/bin/main.exe while.toy
 	llc -filetype=obj -relocation-model=pic program.ll -o program.o
 	clang program.o -o toy_exec
 	./toy_exec

@@ -1,9 +1,3 @@
-(* open Ast
-open Error
-open Lexer
-open Parser
-open Codegen *)
-
 let () =
   match Sys.argv with
   | [| _; path |] ->

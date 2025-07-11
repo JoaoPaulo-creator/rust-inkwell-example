@@ -13,6 +13,13 @@ type codegen = {
   function_types: (string, bool list * bool) Hashtbl.t;
 }
 
+(* Create a global string constant and return a pointer to its data *)
+let create_global_string cg str name =
+  let global = Llvm.define_global name (Llvm.const_string cg.llctx str) cg.llmodule in
+  let str_type = Llvm.array_type (Llvm.i8_type cg.llctx) (String.length str + 1) in
+  Llvm.set_initializer (Llvm.const_string cg.llctx str) global;
+  Llvm.const_gep2 str_type global [| Llvm.const_int cg.i32_type 0; Llvm.const_int cg.i32_type 0 |]
+
 let create_codegen llctx llmodule =
   let builder = builder llctx in
   let i32_type = Llvm.i32_type llctx in
@@ -54,6 +61,8 @@ let rec compile_program cg prog =
     let fn = Llvm.define_function f.name fn_type cg.llmodule in
     let entry = Llvm.append_block cg.llctx "entry" fn in
     Llvm.position_at_end entry cg.builder;
+    
+    (* Handle function parameters *)
     List.iteri
       (fun i name ->
         let param = Llvm.param fn i in
@@ -61,50 +70,127 @@ let rec compile_program cg prog =
         ignore (Llvm.build_store param alloca cg.builder);
         Hashtbl.add cg.variables name alloca)
       f.params;
-    List.iter
-      (fun stmt -> ignore (compile_statement cg stmt (Some fn)))
-      f.body;
+    
+    (* Compile function body *)
+    List.iter (fun stmt -> 
+      match compile_statement cg stmt (Some fn) with
+      | Ok () -> ()
+      | Error e -> raise (CompileError e)
+    ) f.body;
+    
+    (* Add return if missing *)
     if not (List.exists (function Return _ -> true | _ -> false) f.body) then
       ignore (Llvm.build_ret (Llvm.const_int cg.i32_type 0) cg.builder);
+    
     Ok ()
   in
+  
   match analyze_function_types () with
   | Ok () ->
-      List.iter
-        (fun f -> ignore (compile_function_decl f))
-        prog.functions;
+      (* Compile all functions *)
+      List.iter (fun f -> 
+        match compile_function_decl f with
+        | Ok () -> ()
+        | Error e -> raise (CompileError e)
+      ) prog.functions;
+      
+      (* Compile main function *)
       let main_ty = Llvm.function_type cg.i32_type [||] in
       let main_fn = Llvm.define_function "main" main_ty cg.llmodule in
       let entry = Llvm.append_block cg.llctx "entry" main_fn in
       Llvm.position_at_end entry cg.builder;
-      List.iter
-        (fun stmt -> ignore (compile_statement cg stmt (Some main_fn)))
-        prog.statements;
-      ignore (Llvm.build_ret (Llvm.const_int cg.i32_type 0) cg.builder);
+      
+      (* Compile program statements *)
+      List.iter (fun stmt -> 
+        match compile_statement cg stmt (Some main_fn) with
+        | Ok () -> ()
+        | Error e -> raise (CompileError e)
+      ) prog.statements;
+      
+      (* Add final return *)
+      if not (List.exists (function Return _ -> true | _ -> false) prog.statements) then
+        ignore (Llvm.build_ret (Llvm.const_int cg.i32_type 0) cg.builder);
+      
       Ok ()
   | Error e -> Error e
 
-and compile_statement cg stmt =
+and compile_statement cg stmt current_fn =
   match stmt with
   | VarDecl (name, expr) ->
       let value = compile_expr cg expr in
       let alloca = Llvm.build_alloca cg.i32_type name cg.builder in
       ignore (Llvm.build_store value alloca cg.builder);
       Hashtbl.add cg.variables name alloca;
-      fun _ -> Ok ()
+      Ok ()
+  
   | Print expr ->
       let value = compile_expr cg expr in
-      let fmt = Llvm.build_global_stringptr "%d\\n\\0" "fmt" cg.builder in
+      let (fmt_str, name) = 
+        if Llvm.type_of value = cg.i32_type then 
+          ("%d\\n\\0", "fmt_int") 
+        else 
+          ("%s\\n\\0", "fmt_str")
+      in
+      let fmt = create_global_string cg fmt_str name in
       let printf_type = Llvm.type_of cg.printf in
       ignore (Llvm.build_call2 printf_type cg.printf [| fmt; value |] "print_call" cg.builder);
-      fun _ -> Ok ()
+      Ok ()
+  
   | Return expr ->
       let value = compile_expr cg expr in
       ignore (Llvm.build_ret value cg.builder);
-      fun _ -> Ok ()
-  | _ -> fun _ -> Ok ()
+      Ok ()
+  
+  | While (cond, body) -> 
+      let fn = match current_fn with
+        | Some f -> f
+        | None -> failwith "While loop not in function context"
+      in
+      let cond_bb = Llvm.append_block cg.llctx "while.cond" fn in
+      let body_bb = Llvm.append_block cg.llctx "while.body" fn in
+      let end_bb = Llvm.append_block cg.llctx "while.end" fn in
+      
+      (* Jump to condition block *)
+      ignore (Llvm.build_br cond_bb cg.builder);
+      
+      (* Condition block *)
+      Llvm.position_at_end cond_bb cg.builder;
+      let cond_val = compile_expr cg cond in
+      let zero = Llvm.const_int cg.i32_type 0 in
+      let cmp = Llvm.build_icmp Llvm.Icmp.Ne cond_val zero "whilecond" cg.builder in
+      ignore (Llvm.build_cond_br cmp body_bb end_bb cg.builder);
+      
+      (* Body block *)
+      Llvm.position_at_end body_bb cg.builder;
+      List.iter (fun stmt -> 
+        match compile_statement cg stmt current_fn with
+        | Ok () -> ()
+        | Error e -> raise (CompileError e)
+      ) body;
+      ignore (Llvm.build_br cond_bb cg.builder);
+      
+      (* Position builder at end block *)
+      Llvm.position_at_end end_bb cg.builder;
+      Ok ()
+  
+  | Assign (name, expr) ->
+      let value = compile_expr cg expr in
+      let ptr =
+        try Hashtbl.find cg.variables name
+        with Not_found -> raise (CompileError (Codegen ("undefined variable " ^ name)))
+      in
+      ignore (Llvm.build_store value ptr cg.builder);
+      Ok ()
+  
+  | _ -> Ok ()
 
 and compile_expr cg = function
+  | StrLiteral s -> 
+      let global = Llvm.define_global "str" (Llvm.const_string cg.llctx s) cg.llmodule in
+      let str_type = Llvm.array_type (Llvm.i8_type cg.llctx) (String.length s + 1) in
+      Llvm.set_initializer (Llvm.const_string cg.llctx s) global;
+      Llvm.const_gep2 str_type global [| Llvm.const_int cg.i32_type 0; Llvm.const_int cg.i32_type 0 |]
+
   | Number n -> Llvm.const_int cg.i32_type (Int64.to_int n)
   | Bool b -> Llvm.const_int cg.i32_type (if b then 1 else 0)
   | Variable name ->
@@ -113,22 +199,62 @@ and compile_expr cg = function
         with Not_found -> raise (CompileError (Codegen ("undefined variable " ^ name)))
       in
       Llvm.build_load2 cg.i32_type ptr name cg.builder
+
+  | Call (name, args) ->
+      let func = 
+        try Llvm.lookup_function name cg.llmodule
+        with Not_found -> raise (CompileError (Codegen ("undefined function " ^ name)))
+      in
+      let compiled_args = List.map (compile_expr cg) args in
+      Llvm.build_call (Llvm.type_of func) func (Array.of_list compiled_args) "calltmp" cg.builder
+
+  | ArrayLiteral elems ->
+      let array_type = Llvm.array_type cg.i32_type (List.length elems) in
+      let alloca = Llvm.build_alloca array_type "array" cg.builder in
+      List.iteri (fun i elem ->
+        let elem_ptr = 
+          Llvm.build_gep2 array_type alloca 
+            [| Llvm.const_int cg.i32_type 0; Llvm.const_int cg.i32_type i |]
+            "elem_ptr" cg.builder
+        in
+        let val_ = compile_expr cg elem in
+        ignore (Llvm.build_store val_ elem_ptr cg.builder)
+      ) elems;
+      alloca
+
+  | Index (array, index) ->
+      let array_ptr = compile_expr cg array in
+      let index_val = compile_expr cg index in
+      let elem_ptr = 
+        Llvm.build_gep2 (Llvm.type_of array_ptr) array_ptr
+          [| Llvm.const_int cg.i32_type 0; index_val |]
+          "elem_ptr" cg.builder
+      in
+      Llvm.build_load2 cg.i32_type elem_ptr "elem" cg.builder
+
+  | Length array ->
+      let array_ptr = compile_expr cg array in
+      let array_type = Llvm.type_of array_ptr in
+      (match Llvm.element_type array_type with
+       | t when Llvm.is_array_type t -> 
+           Llvm.const_int cg.i32_type (Llvm.array_length t)
+       | _ -> raise (CompileError (Codegen "length operator can only be used on arrays")))
+
   | Binary (op, left, right) ->
       let l = compile_expr cg left in
       let r = compile_expr cg right in
-      let op = match op with
-        | Add -> Llvm.build_add
-        | Sub -> Llvm.build_sub
-        | Mul -> Llvm.build_mul
-        | Div -> Llvm.build_sdiv
-        | Rem -> Llvm.build_srem
-        | Lt -> Llvm.build_icmp Llvm.Icmp.Slt
-        | Le -> Llvm.build_icmp Llvm.Icmp.Sle
-        | Gt -> Llvm.build_icmp Llvm.Icmp.Sgt
-        | Ge -> Llvm.build_icmp Llvm.Icmp.Sge
-        | Eq -> Llvm.build_icmp Llvm.Icmp.Eq
-        | Ne -> Llvm.build_icmp Llvm.Icmp.Ne
-      in
-      op l r "tmp" cg.builder
-  | _ -> raise (CompileError (Codegen "unsupported expression"))
+      match op with
+      | Add -> Llvm.build_add l r "addtmp" cg.builder
+      | Sub -> Llvm.build_sub l r "subtmp" cg.builder
+      | Mul -> Llvm.build_mul l r "multmp" cg.builder
+      | Div -> Llvm.build_sdiv l r "divtmp" cg.builder
+      | Rem -> Llvm.build_srem l r "remtmp" cg.builder
+      | Lt -> Llvm.build_icmp Llvm.Icmp.Slt l r "lttmp" cg.builder
+      | Le -> Llvm.build_icmp Llvm.Icmp.Sle l r "letmp" cg.builder
+      | Gt -> Llvm.build_icmp Llvm.Icmp.Sgt l r "gttmp" cg.builder
+      | Ge -> Llvm.build_icmp Llvm.Icmp.Sge l r "getmp" cg.builder
+      | Eq -> Llvm.build_icmp Llvm.Icmp.Eq l r "eqtmp" cg.builder
+      | Ne -> Llvm.build_icmp Llvm.Icmp.Ne l r "netmp" cg.builder
 
+
+  | _ -> raise (CompileError (Codegen "unsupported expression"))
