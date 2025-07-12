@@ -261,7 +261,7 @@ and compile_expr cg = function
     let array_ptr = compile_expr cg array in
     let array_type = Llvm.type_of array_ptr in 
     let res = 
-      match array_type with
+      match Llvm.classify_type array_type with
       | Llvm.TypeKind.Array -> 
         Llvm.const_int cg.i32_type (Llvm.array_length array_type)
       | _ -> raise (CompileError (Codegen "length operator can only be used on array"))
@@ -283,4 +283,3 @@ and compile_expr cg = function
       | Ne -> Llvm.build_icmp Llvm.Icmp.Ne l r "netmp" cg.builder
     in 
     res
-  | _ -> raise (CompileError (Codegen "unsupported expression"))
