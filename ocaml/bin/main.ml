@@ -10,6 +10,7 @@ let () =
         let llmodule = Llvm.create_module llctx "toy" in
         let cg = Codegen.create_codegen llctx llmodule in
         Codegen.compile_program cg prog |> Result.get_ok;
+        Printf.eprintf ">> dumping IR at %s\n" (Unix.getcwd ());
         Llvm.print_module "program.ll" llmodule;
         (* JIT execution omitted for brevity *)
       with

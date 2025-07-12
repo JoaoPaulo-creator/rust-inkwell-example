@@ -1,4 +1,4 @@
 (executable
  (public_name toy_ocaml)
  (name main)
- (libraries toy_ocaml llvm))
+ (libraries toy_ocaml llvm unix))

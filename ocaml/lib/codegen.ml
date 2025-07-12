@@ -122,6 +122,12 @@ and compile_statement cg stmt current_fn =
       ignore (Llvm.build_store value alloca cg.builder);
       Hashtbl.add cg.variables name alloca;
       Ok ()
+  | LetDecl (name, expr) ->
+      let value = compile_expr cg expr in
+      let alloca = Llvm.build_alloca cg.i32_type name cg.builder in
+      ignore (Llvm.build_store value alloca cg.builder);
+      Hashtbl.add cg.variables name alloca;
+      Ok ()
   
   | Print expr ->
       let value = compile_expr cg expr in

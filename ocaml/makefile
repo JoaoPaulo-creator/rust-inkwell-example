@@ -1,6 +1,5 @@
 build:
 	dune build
-	./_build/default/bin/main.exe
 
 all:
 	dune build
@@ -32,7 +31,7 @@ fct:
 	./toy_exec
 
 teste:
-	./_build/default/bin/main.exe test.toy
+	./_build/install/default/bin/toy_ocaml test.toy
 	llc -filetype=obj -relocation-model=pic program.ll -o program.o
 	clang program.o -o toy_exec
 	./toy_exec
@@ -51,3 +50,4 @@ llvm:
 
 clean:
 	dune clean
+	rm program.ll
