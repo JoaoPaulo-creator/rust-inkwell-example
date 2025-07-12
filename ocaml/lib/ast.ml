@@ -14,7 +14,6 @@ type bin_op =
         | Ne
 
 type expr =
-        | String_ of string
         | Number of int64
         | Bool of bool
         | StrLiteral of string
