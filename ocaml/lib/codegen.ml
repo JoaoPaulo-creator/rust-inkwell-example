@@ -24,7 +24,7 @@ let create_codegen llctx llmodule =
   let builder = builder llctx in
   let i32_type = Llvm.i32_type llctx in
   let i8_ptr = Llvm.pointer_type2 llctx in
-  let printf_type = Llvm.function_type i32_type [| i8_ptr |] in
+  let printf_type = Llvm.var_arg_function_type i32_type [| i8_ptr |] in
   let printf = Llvm.declare_function "printf" printf_type llmodule in
   {
     llctx;
@@ -97,8 +97,8 @@ let rec compile_program cg prog =
       (* Compile main function *)
       let main_ty = Llvm.function_type cg.i32_type [||] in
       let main_fn = Llvm.define_function "main" main_ty cg.llmodule in
-      let entry = Llvm.append_block cg.llctx "entry" main_fn in
-      Llvm.position_at_end entry cg.builder;
+      let entry_bb = Llvm.entry_block main_fn in 
+      Llvm.position_at_end entry_bb cg.builder;
       
       (* Compile program statements *)
       List.iter (fun stmt -> 
@@ -138,8 +138,10 @@ and compile_statement cg stmt current_fn =
           ("%s\\n\\0", "fmt_str")
       in
       let fmt = create_global_string cg fmt_str name in
-      let printf_type = Llvm.type_of cg.printf in
-      ignore (Llvm.build_call2 printf_type cg.printf [| fmt; value |] "print_call" cg.builder);
+      ignore (Llvm.build_call2
+       (Llvm.type_of cg.printf)
+       cg.printf [| fmt; value |] "print_call" cg.builder
+       );
       Ok ()
   
   | Return expr ->
