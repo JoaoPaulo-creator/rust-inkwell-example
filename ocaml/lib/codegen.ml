@@ -134,9 +134,9 @@ and compile_statement cg stmt current_fn =
       let value = compile_expr cg expr in
       let (fmt_str, name) = 
         if Llvm.type_of value = cg.i32_type then 
-          ("%d\\n\\0", "fmt_int") 
+          ("%d \n", "fmt_int") 
         else 
-          ("%s\\n\\0", "fmt_str")
+          ("%s \n", "fmt_str")
       in
       let fmt = create_global_string cg fmt_str name in
       ignore (Llvm.build_call2

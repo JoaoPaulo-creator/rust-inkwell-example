@@ -46,13 +46,7 @@ let () =
   | Ok ()   -> ()
 );
 
-
   (* === Dump IR === *)
   let ir_file = "program.ll" in
   Llvm.print_module ir_file cg.llmodule;
   eprintf ">> dumping IR at %s/%s\n%!" (Sys.getcwd ()) ir_file;
-
-  (* === Compile & Run === *)
-  ignore (Sys.command ("llc -filetype=obj -relocation-model=pic " ^ ir_file ^ " -o program.o"));
-  ignore (Sys.command "clang program.o -o toy_exec");
-  ignore (Sys.command "./toy_exec")

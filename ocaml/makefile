@@ -30,13 +30,6 @@ fct:
 	clang program.o -o toy_exec
 	./toy_exec
 
-teste:
-	./_build/install/default/bin/toy_ocaml test.toy
-	llc -filetype=obj -relocation-model=pic program.ll -o program.o
-	clang program.o -o toy_exec
-	./toy_exec
-
-
 while:
 	./_build/default/bin/main.exe while.toy
 	llc -filetype=obj -relocation-model=pic program.ll -o program.o
@@ -44,8 +37,8 @@ while:
 	./toy_exec
 
 llvm:
-	llc -filetype=obj -relocation=no-pie program.ll -o program.o
-	clang program.o -o toy
+	llc -filetype=obj -relocation-model=pic program.ll -o program.o
+	clang program.o -o toy_exec
 	./toy_exec
 
 clean:
