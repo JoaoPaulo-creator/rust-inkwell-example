@@ -15,30 +15,36 @@ let expect p expected =
   if peek p = expected then (eat p; Ok ())
   else Error (Parse (Printf.sprintf "Expected %s, found %s" (string_of_token expected) (string_of_token (peek p))))
 
+
+(* helper *)
+let rec parse_many_until p stop_token parse_one acc =
+  if peek p = stop_token then (
+    eat p;
+    Ok (List.rev acc)
+  ) else 
+    match parse_one p with
+    | Error e -> Error e
+    | Ok item ->
+      if peek p = Semicolon then eat p;
+      parse_many_until p stop_token parse_one (item :: acc)
+
+
 let rec parse_program p =
-  let rec parse_functions acc =
-    if peek p = EOF then Ok (List.rev acc)
-    else if peek p = Fn then
-      match parse_function p with
-      | Ok func -> parse_functions (func :: acc)
-      | Error e -> Error e
-    else Ok acc
+  let rec collect_fns acc =
+    if peek p = Fn then 
+      match parse_function p with 
+      | Error e -> Error e 
+      | Ok fn -> collect_fns (fn :: acc)
+    else 
+      Ok (List.rev acc)
   in
-  let rec parse_statements acc =
-    if peek p = EOF then Ok (List.rev acc)
-    else
-      match parse_statement p with
-      | Ok stmt ->
-          if peek p = Semicolon then eat p;
-          parse_statements (stmt :: acc)
-      | Error e -> Error e
-  in
-  match parse_functions [] with
-  | Ok functions ->
-      (match parse_statements [] with
-       | Ok statements -> Ok { functions; statements }
-       | Error e -> Error e)
-  | Error e -> Error e
+  match collect_fns [] with 
+  | Error e -> Error e 
+  | Ok functions -> 
+    match parse_many_until p EOF parse_statement [] with
+    | Error e -> Error e
+    | Ok statements -> Ok {functions; statements}
+
 
 and parse_function p =
   match expect p Fn with
@@ -69,21 +75,10 @@ and parse_params p acc =
 and parse_block p =
   match expect p LBrace with
   | Ok () ->
-      let rec parse_stmts acc =
-        if peek p = RBrace then Ok (List.rev acc)
-        else
-          match parse_statement p with
-          | Ok stmt ->
-              if peek p = Semicolon then eat p;
-              parse_stmts (stmt :: acc)
-          | Error e -> Error e
-      in
-      (match parse_stmts [] with
-       | Ok stmts ->
-           (match expect p RBrace with
-            | Ok () -> Ok stmts
-            | Error e -> Error e)
-       | Error e -> Error e)
+       (match parse_many_until p RBrace parse_statement [] with
+       | Error e -> Error e
+       | Ok stmts -> Ok stmts
+       )
   | Error e -> Error e
 
 and parse_statement p =

@@ -105,7 +105,8 @@ let rec compile_program cg prog =
         match compile_statement cg stmt (Some main_fn) with
         | Ok () -> ()
         | Error e -> raise (CompileError e)
-      ) prog.statements;
+      )prog.statements; Printf.eprintf ">>> parsing yielded %d top-level statements \n%!"  
+      (List.length prog.statements);
       
       (* Add final return *)
       if not (List.exists (function Return _ -> true | _ -> false) prog.statements) then
