@@ -40,45 +40,47 @@ let create_codegen llctx llmodule =
 let ptr_type cg = Llvm.pointer_type2 cg.llctx
 
 let rec compile_program cg prog =
-  let analyze_function_types () = Ok () in
-  let compile_function_decl f =
+  let analyze_function_types () = 
+    List.iter (fun f -> 
+      let param_is_array = List.map (fun _ -> false) f.params in 
+      let returns_array = false in 
+      Hashtbl.add cg.function_types f.name (param_is_array, returns_array)
+      ) prog.functions;
+
+    Ok () in
+
+  let compile_function_decl cg f =
     let (param_is_array, returns_array) =
       try Hashtbl.find cg.function_types f.name
       with Not_found -> ([], false)
     in
-    let param_types =
-      List.map
-        (fun is_array ->
-          if is_array then ptr_type cg
-          else cg.i32_type)
-        param_is_array
-    in
+    let param_types = List.map (fun is_array ->
+          if is_array then ptr_type cg else cg.i32_type
+          ) param_is_array in
+
     let fn_type =
       if returns_array then 
         Llvm.function_type (ptr_type cg) (Array.of_list param_types) 
       else Llvm.function_type cg.i32_type (Array.of_list param_types)
     in
+
     let fn = Llvm.define_function f.name fn_type cg.llmodule in
     let entry = Llvm.append_block cg.llctx "entry" fn in
     Llvm.position_at_end entry cg.builder;
     
-    (* Handle function parameters *)
-    List.iteri
-      (fun i name ->
+    List.iteri (fun i name ->
         let param = Llvm.param fn i in
         let alloca = Llvm.build_alloca cg.i32_type name cg.builder in
         ignore (Llvm.build_store param alloca cg.builder);
-        Hashtbl.add cg.variables name alloca)
-      f.params;
+        Hashtbl.add cg.variables name alloca
+        ) f.params;
     
-    (* Compile function body *)
     List.iter (fun stmt -> 
       match compile_statement cg stmt (Some fn) with
       | Ok () -> ()
       | Error e -> raise (CompileError e)
     ) f.body;
     
-    (* Add return if missing *)
     if not (List.exists (function Return _ -> true | _ -> false) f.body) then
       ignore (Llvm.build_ret (Llvm.const_int cg.i32_type 0) cg.builder);
     
@@ -89,7 +91,7 @@ let rec compile_program cg prog =
   | Ok () ->
       (* Compile all functions *)
       List.iter (fun f -> 
-        match compile_function_decl f with
+        match compile_function_decl cg f with
         | Ok () -> ()
         | Error e -> raise (CompileError e)
       ) prog.functions;
@@ -97,7 +99,7 @@ let rec compile_program cg prog =
       (* Compile main function *)
       let main_ty = Llvm.function_type cg.i32_type [||] in
       let main_fn = Llvm.define_function "main" main_ty cg.llmodule in
-      let entry_bb = Llvm.entry_block main_fn in 
+      let entry_bb = Llvm.append_block cg.llctx "entry" main_fn in 
       Llvm.position_at_end entry_bb cg.builder;
       
       (* Compile program statements *)
@@ -105,7 +107,7 @@ let rec compile_program cg prog =
         match compile_statement cg stmt (Some main_fn) with
         | Ok () -> ()
         | Error e -> raise (CompileError e)
-      )prog.statements; Printf.eprintf ">>> parsing yielded %d top-level statements \n%!"  
+      ) prog.statements; Printf.eprintf ">>> parsing yielded %d top-level statements \n%!"  
       (List.length prog.statements);
       
       (* Add final return *)
@@ -147,7 +149,19 @@ and compile_statement cg stmt current_fn =
   
   | Return expr ->
       let value = compile_expr cg expr in
-      ignore (Llvm.build_ret value cg.builder);
+      (match current_fn with 
+        | Some fn -> 
+          let (_, returns_array) = 
+            try  Hashtbl.find cg.function_types (Llvm.value_name fn)
+            with Not_found -> ([], false) in
+          
+          if returns_array then
+            raise (CompileError (Codegen "cannot return array directly"))
+          else 
+            ignore (Llvm.build_ret value cg.builder);
+      
+        | None -> raise (CompileError (Codegen "return outside function")));
+           
       Ok ()
   
   | While (cond, body) -> 
@@ -221,6 +235,10 @@ and compile_expr cg = function
     res
 
   | Call (name, args) ->
+    if not (Hashtbl.mem cg.function_types name) then 
+      raise (CompileError (Codegen ("function '" ^ name ^ "' not declared")));
+
+
     let func =
       match Llvm.lookup_function name cg.llmodule with
       | Some f -> f 
