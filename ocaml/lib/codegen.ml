@@ -50,6 +50,10 @@ let rec compile_program cg prog =
     Ok () in
 
   let compile_function_decl cg f =
+    Hashtbl.reset cg.variables;
+    if not (Hashtbl.mem cg.function_types f.name) then 
+      Hashtbl.add cg.function_types f.name (List.map (fun _ -> false) f.params, false);
+
     let (param_is_array, returns_array) =
       try Hashtbl.find cg.function_types f.name
       with Not_found -> ([], false)
@@ -64,21 +68,33 @@ let rec compile_program cg prog =
       else Llvm.function_type cg.i32_type (Array.of_list param_types)
     in
 
+    Printf.eprintf "Function %s type: %s\n" f.name (Llvm.string_of_lltype fn_type);
+
+
     let fn = Llvm.define_function f.name fn_type cg.llmodule in
     let entry = Llvm.append_block cg.llctx "entry" fn in
     Llvm.position_at_end entry cg.builder;
     
+    Printf.eprintf "Compiling function %s with %d params\n" f.name (List.length f.params);
+    let params = List.rev f.params in 
     List.iteri (fun i name ->
-        let param = Llvm.param fn i in
-        let alloca = Llvm.build_alloca cg.i32_type name cg.builder in
-        ignore (Llvm.build_store param alloca cg.builder);
-        Hashtbl.add cg.variables name alloca
-        ) f.params;
+        try
+          Printf.eprintf "  processing parameter %d: %s\n" i name;
+          let param = Llvm.param fn i in
+          let alloca = Llvm.build_alloca cg.i32_type name cg.builder in
+          ignore (Llvm.build_store param alloca cg.builder);
+          Hashtbl.add cg.variables name alloca
+          with exn ->
+            Printf.eprintf "Error processing parameter %s: %s\n" name (Printexc.to_string exn);
+            raise exn
+        ) params;
     
     List.iter (fun stmt -> 
       match compile_statement cg stmt (Some fn) with
       | Ok () -> ()
-      | Error e -> raise (CompileError e)
+      | Error e -> 
+        Printf.eprintf "Error in statement compilation: %s\n" (string_of_error e) ;
+        raise (CompileError e)
     ) f.body;
     
     if not (List.exists (function Return _ -> true | _ -> false) f.body) then
@@ -98,15 +114,22 @@ let rec compile_program cg prog =
       
       (* Compile main function *)
       let main_ty = Llvm.function_type cg.i32_type [||] in
-      let main_fn = Llvm.define_function "main" main_ty cg.llmodule in
-      let entry_bb = Llvm.append_block cg.llctx "entry" main_fn in 
+      let main_fn = 
+        match Llvm.lookup_function "main" cg.llmodule with 
+        | Some f -> f
+        | None -> Llvm.define_function "main" main_ty cg.llmodule in
+
+      let entry_bb = Llvm.append_block cg.llctx "entry" main_fn in
+
       Llvm.position_at_end entry_bb cg.builder;
       
       (* Compile program statements *)
       List.iter (fun stmt -> 
         match compile_statement cg stmt (Some main_fn) with
         | Ok () -> ()
-        | Error e -> raise (CompileError e)
+        | Error e -> 
+          Printf.eprintf "Compilation error in statement: %s\n" (string_of_error e);
+          raise (CompileError e)
       ) prog.statements; Printf.eprintf ">>> parsing yielded %d top-level statements \n%!"  
       (List.length prog.statements);
       
@@ -148,22 +171,29 @@ and compile_statement cg stmt current_fn =
       Ok ()
   
   | Return expr ->
-      let value = compile_expr cg expr in
-      (match current_fn with 
-        | Some fn -> 
-          let (_, returns_array) = 
-            try  Hashtbl.find cg.function_types (Llvm.value_name fn)
-            with Not_found -> ([], false) in
-          
-          if returns_array then
-            raise (CompileError (Codegen "cannot return array directly"))
-          else 
-            ignore (Llvm.build_ret value cg.builder);
+    let value = compile_expr cg expr in
+    (match current_fn with 
+     | Some fn -> 
+      let value_type = Llvm.type_of value in 
+      let fn_ty = Llvm.type_of fn in 
+      let fn_return_type = Llvm.return_type fn_ty in 
+      Printf.eprintf "Return value type: %s, function return type: %s\n"
+        (Llvm.string_of_lltype value_type)
+        (Llvm.string_of_lltype fn_return_type);
       
-        | None -> raise (CompileError (Codegen "return outside function")));
-           
-      Ok ()
-  
+      if Llvm.string_of_lltype value_type <> "i32" || Llvm.string_of_lltype fn_return_type <> "i32" then
+        raise (CompileError (Codegen (Printf.sprintf "return type mismatch: %s vs %s" (Llvm.string_of_lltype value_type) (Llvm.string_of_lltype fn_return_type))));
+      
+      let ret =
+        try Llvm.build_ret value cg.builder
+        with exn ->
+          raise (CompileError (Codegen (Printf.sprintf "failed to build return: %s" (Printexc.to_string exn))))
+      in
+      ignore ret;
+      
+     | None -> raise (CompileError (Codegen "return outside function")));
+    Ok ()
+
   | While (cond, body) -> 
       let fn = match current_fn with
         | Some f -> f
@@ -196,6 +226,36 @@ and compile_statement cg stmt current_fn =
       Llvm.position_at_end end_bb cg.builder;
       Ok ()
   
+  | If (cond, then_body, else_body_opt) ->
+    let parent_fn = 
+      match current_fn with
+      | Some f -> f 
+      | None -> failwith "if outside function" in 
+        
+    let c = compile_expr cg cond in 
+    let zero = Llvm.const_int cg.i32_type 0 in 
+    let test = Llvm.build_icmp Llvm.Icmp.Ne c zero "ifcond" cg.builder in 
+
+    let then_bb = Llvm.append_block cg.llctx "then" parent_fn in
+    let else_bb = Llvm.append_block cg.llctx "else" parent_fn in
+    let cont_bb = Llvm.append_block cg.llctx "ifcont" parent_fn in
+
+    ignore (Llvm.build_cond_br test then_bb else_bb cg.builder);
+
+    Llvm.position_at_end then_bb cg.builder;
+    List.iter(fun s -> ignore (compile_statement cg s current_fn)) then_body;
+    ignore (Llvm.build_br cont_bb cg.builder);
+
+    Llvm.position_at_end else_bb cg.builder;
+    (match else_body_opt with
+    | Some els -> List.iter (fun s -> ignore(compile_statement cg s current_fn)) els
+    | None -> ());
+    ignore (Llvm.build_br cont_bb cg.builder);
+
+    Llvm.position_at_end cont_bb cg.builder;
+
+    Ok ()
+
   | Assign (name, expr) ->
       let value = compile_expr cg expr in
       let ptr =
@@ -223,7 +283,9 @@ and compile_expr cg = function
       try Hashtbl.find cg.variables name 
       with Not_found -> raise (CompileError (Codegen ("undefined varialbe " ^ name))) 
     in 
-    Llvm.build_load2 cg.i32_type ptr "variable" cg.builder
+    let value = Llvm.build_load2 cg.i32_type ptr name cg.builder in 
+    Printf.eprintf "Loading variable %s, type: %s\n" name (Llvm.string_of_lltype (Llvm.type_of value));
+    value
 
   | Unary (op, expr) ->
     let e = compile_expr cg expr in 
@@ -235,8 +297,13 @@ and compile_expr cg = function
     res
 
   | Call (name, args) ->
-    if not (Hashtbl.mem cg.function_types name) then 
-      raise (CompileError (Codegen ("function '" ^ name ^ "' not declared")));
+    let param_is_array, _ = 
+      try Hashtbl.find cg.function_types name 
+      with Not_found -> raise (CompileError (Codegen ("function '" ^ name ^ "' not declared")))
+    in
+
+    if List.length args <> List.length param_is_array then 
+      raise (CompileError (Codegen ("wrong nubmer of arguments for function " ^  name)));
 
 
     let func =
@@ -296,6 +363,12 @@ and compile_expr cg = function
   | Binary (op, left, right) ->
     let l = compile_expr cg left in 
     let r = compile_expr cg right in
+    
+    Printf.eprintf "Binary op %s, left type: %s, right type: %s\n"
+    (match op with Add -> "+" | _ -> "other")
+    (Llvm.string_of_lltype (Llvm.type_of l))
+    (Llvm.string_of_lltype (Llvm.type_of r));
+
     let res = match op with 
       | Add -> Llvm.build_add l r "addtmp" cg.builder
       | Sub -> Llvm.build_sub l r "subtmp" cg.builder 

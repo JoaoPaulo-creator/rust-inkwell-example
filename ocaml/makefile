@@ -43,4 +43,4 @@ llvm:
 
 clean:
 	dune clean
-	rm program.ll
+	rm program.ll program.o
